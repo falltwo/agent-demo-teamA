@@ -1,0 +1,12 @@
+[
+  {"id": "c1", "question": "請審閱這份合約的風險條款", "expected_tool": "contract_risk_agent"},
+  {"id": "c2", "question": "這份採購契約裡有哪些對我方不利的條款？", "expected_tool": "contract_risk_agent"},
+  {"id": "c3", "question": "合約中的付款條件與智財權歸屬有沒有風險？", "expected_tool": "contract_risk_agent"},
+  {"id": "c4", "question": "幫我做合約風險評估並查相關法條", "expected_tool": "contract_risk_with_law_search"},
+  {"id": "c5", "question": "審閱合約且結合法條查詢，產出風險與法條重點", "expected_tool": "contract_risk_with_law_search"},
+  {"id": "c6", "question": "請查司法院法學資料檢索系統中政府採購法第99條", "expected_tool": "tw_law_web_search"},
+  {"id": "c7", "question": "去搜尋司法院 judicial.gov.tw 民法第 184 條", "expected_tool": "tw_law_web_search"},
+  {"id": "c8", "question": "臺灣民法關於定型化契約的規定有哪些？", "expected_tool": "tw_law_web_search"},
+  {"id": "c9", "question": "這份契約的違約金與解約條款合理嗎？請依知識庫回答", "expected_tool": "rag_search"},
+  {"id": "c10", "question": "列出知識庫裡目前有哪些合約或文件來源", "expected_tool": "list_sources"}
+]
