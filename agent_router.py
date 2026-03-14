@@ -666,7 +666,7 @@ def route_and_answer(
                     return "\n\n---\n\n".join(parts), [], [], "firecrawl_search", None
             return _format_firecrawl_scrape_result(raw), [], [], "firecrawl_search", None
         if any(k in reply for k in ("知識庫", "文件", "內部", "rag")):
-            rag_state = run_rag(question=original_question, top_k=top_k, history=history, strict=False)
+            rag_state = run_rag(question=original_question, top_k=top_k, history=history, strict=False, chat_id=chat_id)
             return (
                 rag_state.get("answer", "") or "",
                 rag_state.get("sources", []) or [],
@@ -679,7 +679,7 @@ def route_and_answer(
 
     # 嚴格模式：直接走 rag_search，不做路由判斷
     if strict:
-        rag_state = run_rag(question=question, top_k=top_k, history=history, strict=True)
+        rag_state = run_rag(question=question, top_k=top_k, history=history, strict=True, chat_id=chat_id)
         answer = rag_state.get("answer", "") or ""
         sources = rag_state.get("sources", []) or []
         chunks = rag_state.get("chunks", []) or []
@@ -828,7 +828,7 @@ def route_and_answer(
         return answer, sources, chunks, "contract_risk_with_law_search", None
 
     if tool == "rag_search":
-        rag_state = run_rag(question=question, top_k=top_k, history=history, strict=False)
+        rag_state = run_rag(question=question, top_k=top_k, history=history, strict=False, chat_id=chat_id)
         answer = rag_state.get("answer", "") or ""
         sources = rag_state.get("sources", []) or []
         chunks = rag_state.get("chunks", []) or []

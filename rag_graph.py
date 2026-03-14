@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import time
 from difflib import SequenceMatcher
 from typing import Any, List, TypedDict
 
@@ -13,13 +14,14 @@ logger = logging.getLogger(__name__)
 from google import genai
 from google.genai import types
 from langgraph.graph import END, StateGraph
+from langgraph.checkpoint.memory import MemorySaver
 
 from rag_common import embed_query as _embed_query_common
 from rag_common import format_context as _format_context_common
 from rag_common import get_clients_and_index
 
 
-class RAGState(TypedDict):
+class _RAGStateRequired(TypedDict):
     question: str
     top_k: int
     context: str
@@ -28,11 +30,30 @@ class RAGState(TypedDict):
     answer: str
     history: List[dict[str, Any]]
     strict: bool
-    packaged_context: str  # 調查員（法務檢索專家）產出，供判官使用
+    packaged_context: str  # 調查員產出，供判官使用
+
+
+class RAGState(_RAGStateRequired, total=False):
+    """RAG 圖狀態。error 為選填，retrieve 失敗時寫入，generate 會直接回覆錯誤不呼叫 LLM。"""
+    error: str
 
 
 # 生成回答時只取最近 N 輪對話，避免過長歷史吃滿 context 並維持「記得上下文」效果
 MAX_HISTORY_TURNS = int(os.getenv("RAG_MAX_HISTORY_TURNS", "12"))
+
+
+def _build_history_blocks(history: list[dict[str, Any]], max_turns: int | None = None) -> str:
+    """將對話歷史轉成給 LLM 的純文字；只取最近 max_turns 輪（預設 MAX_HISTORY_TURNS）。供 package / generate 共用，避免重複邏輯。"""
+    n = max_turns if max_turns is not None else MAX_HISTORY_TURNS
+    blocks: list[str] = []
+    for turn in (history or [])[-n:]:
+        role = turn.get("role", "user")
+        content = (turn.get("content") or "").strip()
+        if not content:
+            continue
+        label = "使用者" if role == "user" else "助理"
+        blocks.append(f"{label}：{content}")
+    return "\n".join(blocks)
 
 # 雙 Prompt 架構：調查員（RAG 先打包）→ 判官（主 Agent 再判定）
 
@@ -326,80 +347,123 @@ def _build_graph():
     chat_client, embed_client, index, index_dim, llm_model, embed_model, index_name = _init_clients_and_index()
 
     def retrieve(state: RAGState) -> RAGState:
+        t0 = time.perf_counter()
         question = state["question"]
         top_k = state.get("top_k") or int(os.getenv("TOP_K", "5"))
         history = state.get("history", [])
         strict = bool(state.get("strict", False))
 
-        # Query Rewriting：依對話歷史用 LLM 將短問／代名詞改寫成完整檢索問句（RAG_USE_HISTORY_FOR_QUERY=1 建議開啟）
-        query_for_embed = question
-        if os.getenv("RAG_USE_HISTORY_FOR_QUERY", "").strip().lower() in ("1", "true", "yes") and history:
-            query_for_embed = _rewrite_query_for_retrieval(
-                chat_client, llm_model, question, history
+        try:
+            # Query Rewriting：依對話歷史用 LLM 將短問／代名詞改寫成完整檢索問句（RAG_USE_HISTORY_FOR_QUERY=1 建議開啟）
+            query_for_embed = question
+            if os.getenv("RAG_USE_HISTORY_FOR_QUERY", "").strip().lower() in ("1", "true", "yes") and history:
+                query_for_embed = _rewrite_query_for_retrieval(
+                    chat_client, llm_model, question, history
+                )
+
+            internal_top_k = max(top_k, int(os.getenv("RAG_INTERNAL_TOP_K", "20")))
+            aux_top_k = int(os.getenv("RAG_AUX_QUERY_TOP_K", "8"))
+            aux_max = int(os.getenv("RAG_AUX_QUERY_MAX", "3"))
+            use_multi_query = os.getenv("RAG_MULTI_QUERY", "").strip().lower() in ("1", "true", "yes")
+
+            qvec = _embed_query_common(
+                embed_client,
+                query_for_embed,
+                model=embed_model,
+                output_dimensionality=index_dim,
             )
+            res = index.query(vector=qvec, top_k=internal_top_k, include_metadata=True)
+            raw_matches = list(res.get("matches", []) or [])
+            seen_keys = {_match_key(m) for m in raw_matches}
 
-        internal_top_k = max(top_k, int(os.getenv("RAG_INTERNAL_TOP_K", "20")))
-        aux_top_k = int(os.getenv("RAG_AUX_QUERY_TOP_K", "8"))
-        aux_max = int(os.getenv("RAG_AUX_QUERY_MAX", "3"))
-        use_multi_query = os.getenv("RAG_MULTI_QUERY", "").strip().lower() in ("1", "true", "yes")
+            if use_multi_query and query_for_embed.strip():
+                aux_queries = _generate_auxiliary_queries(
+                    chat_client, llm_model, query_for_embed, max_queries=aux_max
+                )
+                for aux_q in aux_queries:
+                    if not aux_q:
+                        continue
+                    try:
+                        qvec_aux = _embed_query_common(
+                            embed_client,
+                            aux_q,
+                            model=embed_model,
+                            output_dimensionality=index_dim,
+                        )
+                        res_aux = index.query(vector=qvec_aux, top_k=aux_top_k, include_metadata=True)
+                        for m in res_aux.get("matches", []) or []:
+                            k = _match_key(m)
+                            if k not in seen_keys:
+                                seen_keys.add(k)
+                                raw_matches.append(m)
+                    except Exception as e:
+                        logger.warning("Auxiliary query failed for %r: %s", aux_q, e)
+                merge_cap = int(os.getenv("RAG_MERGE_CAP", str(2 * internal_top_k)))
+                if len(raw_matches) > merge_cap:
+                    raw_matches = sorted(
+                        raw_matches,
+                        key=lambda x: (x.get("score") is not None, x.get("score") or 0.0),
+                        reverse=True,
+                    )[:merge_cap]
 
-        qvec = _embed_query_common(
-            embed_client,
-            query_for_embed,
-            model=embed_model,
-            output_dimensionality=index_dim,
-        )
-        res = index.query(vector=qvec, top_k=internal_top_k, include_metadata=True)
-        raw_matches: list[dict[str, Any]] = list(res.get("matches", []) or [])
-        seen_keys: set[tuple[str, int | None]] = {_match_key(m) for m in raw_matches}
+            min_score_env = os.getenv("RAG_MIN_SCORE")
+            min_score = float(min_score_env) if min_score_env is not None else 0.0
+            filtered_matches = [m for m in raw_matches if m.get("score") is None or m.get("score") >= min_score]
 
-        # 多查詢檢索：依主問句產出輔助問句（如「雙方地址」「付款條件」），再檢索並合併，以補足交叉比對脈絡
-        if use_multi_query and query_for_embed.strip():
-            aux_queries = _generate_auxiliary_queries(
-                chat_client, llm_model, query_for_embed, max_queries=aux_max
-            )
-            for aux_q in aux_queries:
-                if not aux_q:
-                    continue
+            if os.getenv("RAG_DEDUP_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+                filtered_matches = _dedup_matches(filtered_matches)
+
+            if not filtered_matches:
+                logger.info("rag_graph node=retrieve duration_sec=%.3f outcome=ok", time.perf_counter() - t0)
+                return {
+                    "question": question,
+                    "top_k": top_k,
+                    "context": "(無檢索內容)",
+                    "sources": [],
+                    "chunks": [],
+                    "answer": state.get("answer", ""),
+                    "history": history,
+                    "strict": strict,
+                    "packaged_context": "",
+                }
+
+            rerank_top_n = min(max(top_k, 1), int(os.getenv("RAG_RERANK_TOP_N", "5")))
+            mmr_lambda_env = os.getenv("RAG_MMR_LAMBDA", "").strip()
+            if mmr_lambda_env:
                 try:
-                    qvec_aux = _embed_query_common(
-                        embed_client,
-                        aux_q,
-                        model=embed_model,
-                        output_dimensionality=index_dim,
-                    )
-                    res_aux = index.query(vector=qvec_aux, top_k=aux_top_k, include_metadata=True)
-                    for m in res_aux.get("matches", []) or []:
-                        k = _match_key(m)
-                        if k not in seen_keys:
-                            seen_keys.add(k)
-                            raw_matches.append(m)
-                except Exception as e:
-                    logger.warning("Auxiliary query failed for %r: %s", aux_q, e)
-            # 合併後依 score 排序，只保留前 N 筆以控制 rerank 成本（預設 2*internal_top_k）
-            merge_cap = int(os.getenv("RAG_MERGE_CAP", str(2 * internal_top_k)))
-            if len(raw_matches) > merge_cap:
-                raw_matches = sorted(
-                    raw_matches,
-                    key=lambda x: (x.get("score") is not None, x.get("score") or 0.0),
-                    reverse=True,
-                )[:merge_cap]
+                    lam = float(mmr_lambda_env)
+                    lam = max(0.0, min(1.0, lam))
+                except ValueError:
+                    lam = 0.6
+                best_matches = _mmr_select(filtered_matches, top_n=rerank_top_n, lambda_=lam)
+            else:
+                best_matches = _rerank_with_llm(
+                    chat_client,
+                    llm_model,
+                    question,
+                    filtered_matches,
+                    top_n=rerank_top_n,
+                )
 
-        # 依 score 做基本過濾，避免非常不相關的片段
-        min_score_env = os.getenv("RAG_MIN_SCORE")
-        min_score = float(min_score_env) if min_score_env is not None else 0.0
-        filtered_matches: list[dict[str, Any]] = []
-        for m in raw_matches:
-            score = m.get("score")
-            if score is None or score >= min_score:
-                filtered_matches.append(m)
+            context, sources, cleaned_chunks = _format_context_common(best_matches)
+            if not context:
+                context = "(無檢索內容)"
 
-        # 可選：依文字內容去重，避免多段幾乎重複（可設 RAG_DEDUP_ENABLED=1 啟用）
-        if os.getenv("RAG_DEDUP_ENABLED", "").strip().lower() in ("1", "true", "yes"):
-            filtered_matches = _dedup_matches(filtered_matches)
-
-        # 若沒有任何通過門檻的片段，回傳空 context 讓生成端明確回應「不知道」
-        if not filtered_matches:
+            logger.info("rag_graph node=retrieve duration_sec=%.3f outcome=ok", time.perf_counter() - t0)
+            return {
+                "question": question,
+                "top_k": top_k,
+                "context": context,
+                "sources": sources,
+                "chunks": cleaned_chunks,
+                "answer": state.get("answer", ""),
+                "history": history,
+                "strict": strict,
+                "packaged_context": "",
+            }
+        except Exception as e:
+            logger.exception("rag_graph node=retrieve failed")
+            logger.info("rag_graph node=retrieve duration_sec=%.3f outcome=error", time.perf_counter() - t0)
             return {
                 "question": question,
                 "top_k": top_k,
@@ -410,62 +474,20 @@ def _build_graph():
                 "history": history,
                 "strict": strict,
                 "packaged_context": "",
+                "error": str(e)[:500],
             }
-
-        rerank_top_n = min(max(top_k, 1), int(os.getenv("RAG_RERANK_TOP_N", "5")))
-        mmr_lambda_env = os.getenv("RAG_MMR_LAMBDA", "").strip()
-        if mmr_lambda_env:
-            # MMR：λ 約 0.5～0.7，從剩餘結果選出最具代表性的 Top N
-            try:
-                lam = float(mmr_lambda_env)
-                lam = max(0.0, min(1.0, lam))
-            except ValueError:
-                lam = 0.6
-            best_matches = _mmr_select(filtered_matches, top_n=rerank_top_n, lambda_=lam)
-        else:
-            # 使用 LLM 做 rerank
-            best_matches = _rerank_with_llm(
-                chat_client,
-                llm_model,
-                question,
-                filtered_matches,
-                top_n=rerank_top_n,
-            )
-
-        context, sources, cleaned_chunks = _format_context_common(best_matches)
-
-        if not context:
-            context = "(無檢索內容)"
-
-        return {
-            "question": question,
-            "top_k": top_k,
-            "context": context,
-            "sources": sources,
-            "chunks": cleaned_chunks,
-            "answer": state.get("answer", ""),
-            "history": history,
-            "strict": strict,
-            "packaged_context": "",
-        }
 
     def package(state: RAGState) -> RAGState:
         """調查員：用法務檢索專家 Prompt 將檢索內容打包成「原始條文脈絡」+「知識庫參考依據」，供判官使用。"""
+        t0 = time.perf_counter()
         question = state["question"]
         context = state.get("context") or ""
         history = state.get("history", [])
         strict = bool(state.get("strict", False))
         if not context.strip() or context.strip() == "(無檢索內容)":
+            logger.info("rag_graph node=package duration_sec=%.3f outcome=skip", time.perf_counter() - t0)
             return {**state, "packaged_context": context or ""}
-        history_blocks: list[str] = []
-        for turn in history[-MAX_HISTORY_TURNS:]:
-            role = turn.get("role", "user")
-            content = (turn.get("content") or "").strip()
-            if not content:
-                continue
-            label = "使用者" if role == "user" else "助理"
-            history_blocks.append(f"{label}：{content}")
-        history_text = "\n".join(history_blocks)
+        history_text = _build_history_blocks(history)
         if history_text:
             prompt = f"## 對話歷史\n{history_text}\n\n## 目前問題\n{question}\n\n## 檢索內容\n{context}"
         else:
@@ -480,6 +502,7 @@ def _build_graph():
         except Exception as e:
             logger.warning("Investigator package failed, pass through context: %s", e)
             packaged_context = context
+        logger.info("rag_graph node=package duration_sec=%.3f outcome=ok", time.perf_counter() - t0)
         return {
             "question": question,
             "top_k": state.get("top_k", int(os.getenv("TOP_K", "5"))),
@@ -493,23 +516,34 @@ def _build_graph():
         }
 
     def generate(state: RAGState) -> RAGState:
-        """判官：僅依調查員提供的 packaged_context 做風險判定。"""
+        """判官：僅依調查員提供的 packaged_context 做風險判定。檢索失敗（state 含 error）時直接回覆錯誤訊息不呼叫 LLM。"""
+        t0 = time.perf_counter()
         question = state["question"]
         context = state.get("context") or ""
         packaged_context = state.get("packaged_context") or context
         history = state.get("history", [])
         strict = bool(state.get("strict", False))
+        err = state.get("error")
 
-        history_blocks: list[str] = []
-        for turn in history[-MAX_HISTORY_TURNS:]:
-            role = turn.get("role", "user")
-            content = (turn.get("content") or "").strip()
-            if not content:
-                continue
-            label = "使用者" if role == "user" else "助理"
-            history_blocks.append(f"{label}：{content}")
-        history_text = "\n".join(history_blocks)
+        if err:
+            answer = (
+                "檢索時發生錯誤，無法依知識庫回答。請稍後再試或檢查向量庫連線。\n"
+                "（錯誤摘要：" + (err[:300] + "…" if len(err) > 300 else err) + "）"
+            )
+            logger.info("rag_graph node=generate duration_sec=%.3f outcome=error_reply", time.perf_counter() - t0)
+            return {
+                "question": question,
+                "top_k": state.get("top_k", int(os.getenv("TOP_K", "5"))),
+                "context": context,
+                "sources": state.get("sources", []),
+                "chunks": state.get("chunks", []),
+                "answer": answer,
+                "history": history,
+                "strict": strict,
+                "packaged_context": packaged_context,
+            }
 
+        history_text = _build_history_blocks(history)
         system = _JUDGE_SYSTEM_STRICT if strict else _JUDGE_SYSTEM_ADVISOR
         if history_text:
             prompt = f"## 對話歷史\n{history_text}\n\n## 目前問題\n{question}\n\n## 檢索專家提供的脈絡（原始條文脈絡與知識庫參考依據）\n{packaged_context}"
@@ -521,8 +555,8 @@ def _build_graph():
             contents=prompt,
             config=types.GenerateContentConfig(system_instruction=system),
         )
-
         answer = (out.text or "").strip()
+        logger.info("rag_graph node=generate duration_sec=%.3f outcome=ok", time.perf_counter() - t0)
         return {
             "question": question,
             "top_k": state.get("top_k", int(os.getenv("TOP_K", "5"))),
@@ -535,16 +569,23 @@ def _build_graph():
             "packaged_context": packaged_context,
         }
 
+    def _route_after_retrieve(s: RAGState) -> str:
+        """無檢索內容時跳過調查員（package），直接進判官（generate），省一次 LLM 呼叫。"""
+        ctx = (s.get("context") or "").strip()
+        if not ctx or ctx == "(無檢索內容)":
+            return "generate"
+        return "package"
+
     builder = StateGraph(RAGState)
     builder.add_node("retrieve", retrieve)
     builder.add_node("package", package)
     builder.add_node("generate", generate)
     builder.set_entry_point("retrieve")
-    builder.add_edge("retrieve", "package")
+    builder.add_conditional_edges("retrieve", _route_after_retrieve, {"package": "package", "generate": "generate"})
     builder.add_edge("package", "generate")
     builder.add_edge("generate", END)
 
-    _GRAPH = builder.compile()
+    _GRAPH = builder.compile(checkpointer=MemorySaver())
     return _GRAPH
 
 
@@ -553,11 +594,13 @@ def run_rag(
     top_k: int | None = None,
     history: list[dict[str, Any]] | None = None,
     strict: bool = False,
+    chat_id: str | None = None,
 ) -> RAGState:
     """對外公開：使用 LangGraph 跑一次 RAG 流程。
 
     history：前文對話紀錄（role/user, content）
     strict：是否嚴格只依據檢索內容與歷史回答
+    chat_id：選填，用於 Checkpointing 的 thread_id（同一對話可沿用同一 id 以支援未來重放／續跑）
     """
     graph = _build_graph()
     state: RAGState = {
@@ -571,7 +614,8 @@ def run_rag(
         "strict": strict,
         "packaged_context": "",
     }
-    result_raw = graph.invoke(state)
+    config = {"configurable": {"thread_id": chat_id or "default"}}
+    result_raw = graph.invoke(state, config=config)
     result: RAGState = {
         "question": result_raw.get("question", question),
         "top_k": result_raw.get("top_k", state["top_k"]),
@@ -583,6 +627,8 @@ def run_rag(
         "strict": bool(result_raw.get("strict", state["strict"])),
         "packaged_context": result_raw.get("packaged_context", ""),
     }
+    if result_raw.get("error"):
+        result["error"] = result_raw["error"]
     return result
 
 
