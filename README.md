@@ -54,6 +54,7 @@
 - [使用方式](#四使用方式)
 - [進階與備註](#五進階與備註)
 - [開發與測試](#六開發與測試)
+- [建議可增加的擴充](#七建議可增加的擴充)
 - [更新記錄（lawtools 分支）](#更新記錄lawtools-分支)
 
 ---
@@ -76,9 +77,8 @@
 
 | 類型 | 名稱／識別 | 檔案或模組 | 說明 |
 |------|------------|------------|------|
-| （範例）法規 tool | `law_search` | `law_tools.py` 或 `agent_router` 內擴充 | 查詢法規條文、函釋等 |
-| （範例）專家 Agent | `legal_agent` | `expert_agents.py` 或新模組 | 法遵／法務專家子 Agent |
-| *（請在此新增你實際加入的 tool／Agent）* | | | |
+| 專家 Agent | `contract_risk_agent` | `expert_agents.py` | 合約／採購法遵審閱：依知識庫檢索產出條款類型、風險等級與建議。 |
+| 整合流程 | `contract_risk_with_law_search` | `agent_router.py` | 合約審閱＋法條查詢：RAG 取合約 → 抽法條字號 → **Tavily** 查司法院／網路條文 → **Firecrawl** 法條對比 → LLM 風險評估 → **AI 自檢** → **免責聲明**。 |
 
 - 若尚未 commit，可先在此填寫預定名稱與說明，之後補上對應程式再更新本表。
 - 既有 **SUPPORTED_TOOLS** 在 `agent_router.py`；若新增 tool，需在該處加入名稱並在路由與執行分支實作對應邏輯；`tools/__init__.py` 目前從 `agent_router.SUPPORTED_TOOLS` 匯出，無需重複註冊。
@@ -86,7 +86,7 @@
 ### 程式更新流程（本分支實際使用）
 
 1. **環境與 API key**  
-   與 main 相同：`uv` + `.env`（含 `FIRECRAWL_API_KEY`、`GOOGLE_API_KEY`、`PINECONE_API_KEY`、`TAVILY_API_KEY` 等）。爬蟲與法規擷取需至少具備 Firecrawl（與必要時 Tavily）。
+   與 main 相同：`uv` + `.env`（含 `FIRECRAWL_API_KEY`、`GOOGLE_API_KEY`、`PINECONE_API_KEY`、`TAVILY_API_KEY` 等）。爬蟲與法規擷取需至少具備 Firecrawl（與必要時 Tavily）。**合約審閱＋法條查詢**需 `TAVILY_API_KEY`（查司法院／網路條文）與選用 `FIRECRAWL_API_KEY`（法條對比擷取）。
 
 2. **爬蟲擷取法規／條例來源**  
    - **單頁**：用 `firecrawl_tools.scrape_url(url)` 擷取指定法規頁面，取得 Markdown 或文字。  
@@ -95,15 +95,26 @@
    擷取結果可存成檔案放入 `data/`，供後續灌入知識庫。
 
 3. **灌入知識庫**  
-   將擷取或整理好的法規／條例文件（txt、md、pdf）放入 `data/`，執行 `uv run rag_ingest.py` → 切 chunk、embed、寫入 Pinecone，更新 `sources_registry.json`。之後即可用 RAG 做「條例問答」。
+   將擷取或整理好的法規／條例文件（txt、md、pdf）放入 `data/`，執行 `uv run rag_ingest.py` → 切 chunk、embed、寫入 Pinecone，更新 `sources_registry.json`。之後即可用 RAG 做「條例問答」。合約審閱時會從知識庫取合約內容並抽出法條字號。
 
-4. **法律條例調查（問答流程）**  
+4. **合約審閱＋法條查詢（變更流程）**  
+   當使用者問題符合「審閱合約」「合約風險」「分析／檢查／評估 合約／契約／租賃契約」等意圖時，系統走 **contract_risk_with_law_search**，流程如下：
+   - **1) RAG 取合約**：從 Pinecone 檢索使用者上傳的合約／文件，組成 context。
+   - **2) 抽法條字號**：以正則從檢索內容抽出「法律名稱＋條號」（如民法第 421 條、消費者保護法、租賃住宅市場發展及管理條例等）。
+   - **3) Tavily 查司法院／網路條文**：對每筆法條字號查詢 `{法條} site:judicial.gov.tw`，取得條文與實務見解；若未抽到法條則以「成屋買賣 民法／消保法」等後備查詢。需設定 `TAVILY_API_KEY` 才會執行。
+   - **4) Firecrawl 法條對比**（選用）：以法條字號搜尋「全國法規資料庫 OR 司法院」並擷取頁面內容，與合約引用對照以增加可信度。需設定 `FIRECRAWL_API_KEY` 才會執行。
+   - **5) LLM 風險評估**：依「合約檢索內容」＋「查詢到的相關條文」＋「爬蟲擷取之法條對比」產出：合約條款風險摘要、相關法條重點、風險提醒與建議、法條字號清單、來源列表。
+   - **6) AI 自檢**：由 LLM 對回答做一致性檢查（與合約／法條摘要是否一致、建議人工再確認之處、具體建議），結果附於文末。
+   - **7) 免責聲明**：系統於回答結尾強制附加「本分析僅供內部風險初步檢視與參考，不能視為正式法律意見，重要合約仍應由執業律師審閱。」
+
+5. **法律條例調查（問答流程）**  
    啟動 `uv run streamlit run streamlit_app.py`，在介面提問：  
+   - 若問題為**合約／契約審閱、分析、風險、法條**（見上節）→ 走 **contract_risk_with_law_search**（Tavily ＋ 選用 Firecrawl）。  
    - 若問題偏向「已知知識庫內的法規／條例」→ Agent 會選 `rag_search`／`research`，從 Pinecone 檢索後生成答案。  
    - 若需「即時網路上的法規、函釋、判決」→ Agent 會選 `web_search` 或 `firecrawl_search`（擷取搜尋結果頁面），再回傳整理結果。  
    流程與 main 相同：`agent_router.route_and_answer()` 依問題決定工具；**若你已在本分支新增法規／法遵相關 tool 或專家 Agent**（並已加入 `SUPPORTED_TOOLS` 與路由邏輯），Agent 會多出對應選項，請在上方「本分支與 tools 相關的擴充」表格中列出名稱與說明。
 
-5. **後續可擴充**  
+6. **後續可擴充**  
    若本分支後續新增「法規專用 tool」或「法遵／法務專家 Agent」，可在此節補上對應檔案與呼叫流程。
 
 ---
@@ -124,7 +135,7 @@
 
 | 類別 | 選型 | 說明 |
 |------|------|------|
-| **LLM / Embedding** | Google **Gemini** | 對話預設 `gemini-2.5-flash`，向量化 `gemini-embedding-001`；Eval 可選 **Groq**（`llama-3.3-70b-versatile`）避開免費額度限制。 |
+| **LLM / Embedding** | Google **Gemini** | 對話預設 `gemini-3.1-flash-lite-preview`（Gemini 3.1 Flash Lite），向量化 `gemini-embedding-001`；Eval 可選 **Groq**（`llama-3.3-70b-versatile`）避開免費額度限制。 |
 | **向量庫** | **Pinecone** | 存文件切片向量與 metadata，支援高維檢索。 |
 | **RAG 流程** | **LangGraph** | StateGraph：檢索 → 過濾／去重／MMR 或 LLM rerank → 生成。 |
 | **前端** | **Streamlit** | 聊天介面、多對話、上傳灌入、圖表、**Eval 運行記錄**與**Eval 批次結果**檢視。 |
@@ -159,7 +170,8 @@
 | **網路／網頁** | `web_search`、`scrape_url`、`firecrawl_search` |
 | **圖表** | `create_chart`、`analyze_and_chart` |
 | **公司工具** | `financial_metrics`、`parse_dates_from_text`、`generate_quarterly_plan` |
-| **專家** | `financial_report_agent`、`esg_agent` |
+| **專家** | `financial_report_agent`、`esg_agent`、`contract_risk_agent` |
+| **合約＋法條** | `contract_risk_with_law_search`（RAG → 抽法條 → Tavily 司法院／網路 → Firecrawl 對比 → 自檢 → 免責聲明） |
 | **對話** | `small_talk`、`ask_web_vs_rag` |
 
 ### 2.4 整體問答流程（Workflow）
@@ -182,6 +194,11 @@
             │
             ├─ Firecrawl 意圖層：規則或可選 LLM 判斷「擷取單頁 / 搜尋並擷取」
             │       → 命中則執行 scrape_url 或 firecrawl_search
+            │
+            ├─ 台灣法律／司法院意圖（tw_law_intent）→ tw_law_web_search
+            │
+            ├─ 合約審閱＋法條查詢（contract_risk_with_law_intent）：問題含「審閱合約」「合約風險」或「合約／契約／租賃＋分析／檢查／評估」等
+            │       → contract_risk_with_law_search（RAG → 抽法條 → Tavily 查司法院／網路 → Firecrawl 法條對比 → LLM 風險評估 → AI 自檢 → 免責聲明）
             │
             └─ 否則 → LLM 工具路由（_decide_tool）
                     → 依選出之 tool 執行（rag_search / research / web_search / 圖表 / 公司工具 / 專家等）
@@ -214,8 +231,9 @@ StateGraph(RAGState)
 - **網路與網頁**：Tavily 一般搜尋、Firecrawl 單頁擷取與關鍵字搜尋擷取；意圖可由規則或可選 LLM 判斷。
 - **圖表**：依使用者描述或資料畫 ECharts；analyze_and_chart 從知識庫檢索後分析並可確認後產圖，可選 ECharts MCP 產 PNG。
 - **公司工具**：財報指標計算、從文字解析日期、產生季度計畫表。
-- **專家**：財報／營運、ESG／法遵專用回答。
-- **前端**：多對話、嚴格／非嚴格模式、上傳並灌入文件、檢索片段與圖表展示；側欄可切換「對話」「Eval 運行記錄」「Eval 批次結果」。
+- **專家**：財報／營運、ESG／法遵、合約／採購法遵（contract_risk_agent）專用回答。
+- **合約審閱＋法條查詢**：問題為審閱合約、合約風險或分析／檢查契約時，走 **contract_risk_with_law_search**：RAG 取合約 → 抽法條字號 → **Tavily** 查司法院／網路條文與實務 → **Firecrawl** 擷取法條對比（選用）→ LLM 產出風險摘要、法條重點、建議、法條字號清單與來源列表 → **AI 自檢**（一致性與具體建議）→ 文末強制附加**免責聲明**。需 `TAVILY_API_KEY`（與選用 `FIRECRAWL_API_KEY`）。
+- **前端**：多對話、嚴格／非嚴格模式、上傳並灌入文件、檢索片段與圖表展示、**清空資料庫**按鈕；側欄可切換「對話」「Eval 運行記錄」「Eval 批次結果」。
 
 ---
 
@@ -247,8 +265,8 @@ uv run streamlit run streamlit_app.py
 
 | 變數 | 說明 |
 |------|------|
-| `TAVILY_API_KEY` | 網路搜尋（Tavily） |
-| `FIRECRAWL_API_KEY` | 網頁擷取／搜尋 |
+| `TAVILY_API_KEY` | 網路搜尋（Tavily）；**合約審閱＋法條查詢**時用於查司法院／網路條文與實務。 |
+| `FIRECRAWL_API_KEY` | 網頁擷取／搜尋；**合約審閱＋法條查詢**時用於法條對比擷取（選用）。 |
 | `USE_ECHARTS_MCP=1` | 圖表 PNG 輸出（需本機 Node.js 18+） |
 | `EVAL_LOG_ENABLED=1` | 寫入 Eval 運行記錄，路徑 `EVAL_LOG_PATH`（預設 `eval_runs.jsonl`） |
 | `GROQ_API_KEY` | Eval 時以 `--groq` 使用 Groq；**勿在 .env 寫 `EVAL_USE_GROQ=1`**（否則 Streamlit 也會用 Groq） |
@@ -304,6 +322,52 @@ uv run python eval/run_eval.py --groq
 
 - **依賴與執行**：**uv**（`pyproject.toml`，Python ≥3.13）。
 - **測試**：`uv run pytest`（需安裝 dev 依賴：`uv sync --extra dev`）；測試位於 `tests/`。
+
+---
+
+## 七、建議可增加的擴充
+
+以下為針對本專案可再強化的方向，依**體驗與功能**、**穩定性與維運**、**安全與合規**、**法遵／合約**四類整理，可依優先序擇項實作。
+
+### 7.1 體驗與功能
+
+| 項目 | 說明 |
+|------|------|
+| **對話匯出** | 支援將單一對話或全部對話匯出為 Markdown／PDF，方便存檔或分享（含問題、回答、來源列表與時間戳）。 |
+| **檢索片段可複製** | 在「查看檢索片段」區塊為每個 chunk 提供一鍵複製或「引用此段」按鈕，方便撰寫報告時引用。 |
+| **合約審閱結果匯出** | 合約審閱＋法條查詢完成後，提供「下載報告」按鈕（MD／PDF），內含風險摘要、法條清單、來源、自檢與免責聲明。 |
+| **對話標題可編輯** | 側欄對話列表支援手動重新命名標題，而非僅用首句問題前 20 字。 |
+| **快捷提示（prompt 範本）** | 側欄或輸入框旁提供常用問法（如「審閱這份合約並查法條」「列出知識庫來源」），一鍵填入。 |
+| **Streaming 回答** | 若 LLM 支援，改為串流輸出回答文字，減少長時間等待感。 |
+
+### 7.2 穩定性與維運
+
+| 項目 | 說明 |
+|------|------|
+| **健康檢查** | 提供簡易 health endpoint 或 CLI（如 `uv run python -c "from rag_common import get_clients_and_index; get_clients_and_index()"`），確認 Pinecone、Gemini、.env 是否正常。 |
+| **環境檢查頁** | 在 Streamlit 側欄或獨立頁顯示：各 API key 是否已設定（不顯示實際 key）、Pinecone index 維度、目前 Chat／Embed 模型，方便除錯。 |
+| **請求逾時與重試** | 對 Tavily、Firecrawl、Gemini 等外部 API 設定合理 timeout；Streamlit 對話路徑可考慮對 429／暫時錯誤做重試或友善提示（Eval 與 embed 已有部分重試）。 |
+| **清空資料庫確認** | 「清空資料庫」按鈕改為二次確認（例如輸入「確認清空」或勾選），避免誤觸。 |
+| **日誌與追蹤** | 重要操作（灌入、清空、合約審閱流程）寫入結構化 log（含 tool、chat_id、耗時）；可選整合 LangSmith／OpenTelemetry 做 trace。 |
+
+### 7.3 安全與合規
+
+| 項目 | 說明 |
+|------|------|
+| **輸入長度與格式** | 對使用者問題與上傳檔名做長度與字元檢查，避免過長或異常字元導致錯誤或濫用。 |
+| **上傳檔案類型與大小** | 除副檔名外，可依 magic bytes 檢查真實檔案類型；單檔與單次上傳總大小限制可設為可配置（如 .env）。 |
+| **敏感資訊** | 若對話或灌入內容可能含個資／機密，可加註說明或提供「不記錄此對話」選項、本機-only 模式等（依需求取捨）。 |
+
+### 7.4 法遵／合約相關
+
+| 項目 | 說明 |
+|------|------|
+| **法條正則擴充** | 目前 `_LAW_REF_PATTERN` 已含民法、消保法、租賃住宅市場發展及管理條例等；可再擴充「第 N 條之 M」「第 N 條第 M 項」等 pattern，或支援更多法規名稱。 |
+| **全國法規資料庫 API** | 若有穩定 API，可整合「法條字號 → 條文內容」直接查詢，減少依賴 Tavily 搜尋結果不穩定性。 |
+| **合約審閱 Eval 題集** | 在 `eval/eval_set.json` 或另建題集，加入合約審閱／法條查詢範例題與預期 tool（`contract_risk_with_law_search`），方便回歸測試與比對。 |
+| **多語言免責聲明** | 若需服務英文或其他語系使用者，可將免責聲明改為依介面語系或參數選擇不同語句。 |
+
+以上項目可依團隊資源與優先序挑選實作，並在「更新記錄」或本節補充實際完成項目。
 
 ---
 
