@@ -54,6 +54,7 @@
 - [使用方式](#四使用方式)
 - [進階與備註](#五進階與備註)
 - [開發與測試](#六開發與測試)
+- [更新記錄（Recent Updates）](#更新記錄recent-updates)
 
 ---
 
@@ -94,7 +95,7 @@
 | **sources_registry.py** | 來源註冊表（JSON），記錄每個 source 與 chunk 數，供 `list_sources` 使用。 |
 | **streamlit_app.py** | Streamlit 介面：多對話、嚴格／非嚴格模式、上傳灌入、檢索片段與圖表、**Eval 運行記錄**、**Eval 批次結果**。 |
 | **company_tools.py** | 公司工具：財報指標計算、日期解析、季度計畫表。 |
-| **expert_agents.py** | 專家子 Agent：財報／營運（FinancialReportAgent）、ESG／法遵（ESGAgent）。 |
+| **expert_agents.py** | 專家子 Agent：財報／營運（financial_report_agent）、ESG／法遵（esg_agent）、資料分析（data_analyst_agent）、合約法遵審閱（contract_risk_agent）。 |
 | **echarts_tools.py** / **echarts_mcp_client.py** | 圖表 option 產生與可選 MCP PNG 輸出。 |
 | **firecrawl_tools.py** | Firecrawl API 封裝（scrape、search、crawl、map）。 |
 | **eval_log.py** | 問答運行記錄（可選寫入每筆問題／答案／tool／延遲）。 |
@@ -108,7 +109,7 @@
 | **網路／網頁** | `web_search`、`scrape_url`、`firecrawl_search` |
 | **圖表** | `create_chart`、`analyze_and_chart` |
 | **公司工具** | `financial_metrics`、`parse_dates_from_text`、`generate_quarterly_plan` |
-| **專家** | `financial_report_agent`、`esg_agent` |
+| **專家** | `financial_report_agent`、`esg_agent`、`data_analyst_agent`、`contract_risk_agent` |
 | **對話** | `small_talk`、`ask_web_vs_rag` |
 
 ### 2.4 整體問答流程（Workflow）
@@ -163,7 +164,7 @@ StateGraph(RAGState)
 - **網路與網頁**：Tavily 一般搜尋、Firecrawl 單頁擷取與關鍵字搜尋擷取；意圖可由規則或可選 LLM 判斷。
 - **圖表**：依使用者描述或資料畫 ECharts；analyze_and_chart 從知識庫檢索後分析並可確認後產圖，可選 ECharts MCP 產 PNG。
 - **公司工具**：財報指標計算、從文字解析日期、產生季度計畫表。
-- **專家**：財報／營運、ESG／法遵專用回答。
+- **專家**：財報／營運、ESG／法遵、資料分析（報表摘要／數據趨勢）、合約法遵審閱（條款、風險、民法／消保法）專用回答。
 - **前端**：多對話、嚴格／非嚴格模式、上傳並灌入文件、檢索片段與圖表展示；側欄可切換「對話」「Eval 運行記錄」「Eval 批次結果」。
 
 ---
@@ -253,6 +254,30 @@ uv run python eval/run_eval.py --groq
 
 - **依賴與執行**：**uv**（`pyproject.toml`，Python ≥3.13）。
 - **測試**：`uv run pytest`（需安裝 dev 依賴：`uv sync --extra dev`）；測試位於 `tests/`。
+
+---
+
+## 更新記錄（Recent Updates）
+
+以下為專案分析後整理之架構要點與近期變更，便於新成員或 fork 後快速對齊現況。
+
+### 專案架構摘要
+
+- **定位**：RAG + 多工具 Agent + Streamlit 示範；以知識庫問答為核心，依問題自動路由至檢索、網路搜尋、網頁擷取、圖表、公司工具或專家子 Agent。
+- **技術棧**：Gemini（LLM + embedding）、Pinecone、LangGraph（RAG StateGraph）、Streamlit；可選 Tavily、Firecrawl、ECharts MCP。
+- **資料流**：使用者問題 → `agent_router` 決定工具 → 執行（如 `rag_graph.run_rag`、專家、web_search 等）→ 回傳答案與來源；RAG 為 retrieve → 過濾／去重／MMR 或 rerank → generate。
+- **文件**：`docs/` 內含 RAG 記憶與上下文、前端設計分析、專案與負責區塊完整度分析等；根目錄另有 `competition_notes_contract_ai.md` 競賽／合約 AI 筆記。
+
+### 近期更新（main 分支）
+
+| 項目 | 說明 |
+|------|------|
+| **RAG 與 Agent** | `rag_graph.py` 檢索與生成流程強化；`agent_router.py` 工具路由與 Firecrawl 意圖判斷完善。 |
+| **專家擴充** | 新增 **data_analyst_agent**（報表摘要、數據趨勢、從內容整理數字）、**contract_risk_agent**（合約／採購／法遵審閱、條款與風險說明）。 |
+| **前端與資源** | `streamlit_app.py` 介面調整；新增 `assets/custom.css` 客製樣式；競賽筆記與文件補齊。 |
+| **環境與設定** | `.env.example` 更新（RAG 記憶、多查詢等選項）；Eval 與日誌路徑可透過環境變數設定。 |
+
+後續若合併 **lawtools** 等分支，將再補上法律檢索、司法院法學資料、合約風險與法條查詢等擴充說明。
 
 ---
 
