@@ -22,6 +22,7 @@ from rag_common import (
     get_clients_and_index,
     stable_id,
 )
+from rag_common import append_bm25_corpus
 from sources_registry import load_registry, save_registry, list_sources, update_registry_on_ingest
 
 
@@ -280,7 +281,7 @@ def ingest_uploaded_files(
     uploaded_files: list[Any],
     chat_id: str | None = None,
 ) -> int:
-    # 只支援純文字（.txt/.md）；其他格式先不處理，避免額外依賴
+    # 支援 .txt / .md / .pdf / .docx
     all_sources: list[str] = []
     all_texts: list[str] = []
     all_chunk_indexes: list[int] = []
@@ -289,7 +290,7 @@ def ingest_uploaded_files(
     for uf in uploaded_files:
         name = getattr(uf, "name", "uploaded")
         lower_name = name.lower()
-        if not (lower_name.endswith(".txt") or lower_name.endswith(".md") or lower_name.endswith(".pdf")):
+        if not (lower_name.endswith(".txt") or lower_name.endswith(".md") or lower_name.endswith(".pdf") or lower_name.endswith(".docx")):
             continue
 
         raw = uf.getvalue()
@@ -302,6 +303,14 @@ def ingest_uploaded_files(
                     if t:
                         pages_text.append(t)
                 text = "\n\n".join(pages_text)
+            except Exception:
+                text = ""
+        elif lower_name.endswith(".docx"):
+            try:
+                from docx import Document
+                doc = Document(BytesIO(raw))
+                parts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+                text = "\n\n".join(parts)
             except Exception:
                 text = ""
         else:
@@ -352,6 +361,17 @@ def ingest_uploaded_files(
             for s, c in source_counts.items()
         ]
     )
+    # BM25 語料：上傳灌入時追加（含 chat_id）
+    append_bm25_corpus([
+        {
+            "id": all_ids[j],
+            "text": all_texts[j],
+            "source": all_sources[j],
+            "chunk_index": all_chunk_indexes[j],
+            "chat_id": chat_id,
+        }
+        for j in range(len(all_texts))
+    ])
     return len(all_texts)
 
 
@@ -478,7 +498,7 @@ def main() -> None:
     # 空對話時顯示引導文案（強調合約審閱流程）
     if not current_conv["messages"]:
         st.info(
-            "**合約審閱**：先展開「為此對話上傳並灌入文件」上傳合約 .pdf / .txt / .md，按「灌入到向量庫」後，"
+            "**合約審閱**：先展開「為此對話上傳並灌入文件」上傳合約 .pdf / .docx / .txt / .md，按「灌入到向量庫」後，"
             "在側欄點「一鍵審閱」或輸入「請審閱這份合約的風險條款」即可。"
         )
         st.markdown("")  # 小留白
@@ -515,10 +535,10 @@ def main() -> None:
                         st.markdown(f"**{c['tag']}**\n\n{c['text']}")
 
     with st.expander("為此對話上傳並灌入文件"):
-        st.caption("支援 `.txt` / `.md` / `.pdf`。上傳後按「灌入到向量庫」，即可立刻用來問答。")
+        st.caption("支援 `.txt` / `.md` / `.pdf` / `.docx`。上傳後按「灌入到向量庫」，即可立刻用來問答。")
         uploads = st.file_uploader(
             "選擇檔案",
-            type=["txt", "md", "pdf"],
+            type=["txt", "md", "pdf", "docx"],
             accept_multiple_files=True,
             key=f"uploads-{active_conv_id}",
         )

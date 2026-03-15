@@ -1,13 +1,15 @@
-"""RAG 共用模組：chunk、format_context、Pinecone/Gemini 初始化、embed。
+"""RAG 共用模組：chunk、format_context、Pinecone/Gemini 初始化、embed、BM25 Hybrid。
 
 供 rag_graph、rag_ingest、streamlit_app 使用，避免重複實作。
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -200,3 +202,157 @@ def embed_texts(
         if delay > 0 and i + batch_size < len(texts):
             time.sleep(delay)
     return vectors
+
+
+# ---------- BM25 Hybrid（向量 + 關鍵字檢索）---------
+
+def get_bm25_corpus_path() -> Path:
+    """BM25 語料檔路徑，可由環境變數 BM25_CORPUS_PATH 覆寫。"""
+    load_dotenv()
+    p = os.getenv("BM25_CORPUS_PATH", "bm25_corpus.json")
+    return Path(p)
+
+
+def _bm25_tokenize(text: str) -> list[str]:
+    """BM25 用分詞：中文以字為單位、保留英文/數字詞，利於條號與術語匹配。"""
+    if not text or not text.strip():
+        return []
+    # 英文/數字連續成一 token，其餘（含中文）逐字
+    tokens: list[str] = []
+    buf = ""
+    for c in text:
+        if c.isalnum() or c in "._-":
+            buf += c
+        else:
+            if buf:
+                tokens.append(buf)
+                buf = ""
+            if c.strip():
+                tokens.append(c)
+    if buf:
+        tokens.append(buf)
+    return tokens
+
+
+def load_bm25_corpus() -> list[dict[str, Any]]:
+    """載入 BM25 語料：每筆為 {id, text, source, chunk_index, chat_id}。無檔或空則回傳 []。"""
+    path = get_bm25_corpus_path()
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [c for c in data if isinstance(c, dict) and c.get("id") and c.get("text") is not None]
+
+
+def save_bm25_corpus(chunks: list[dict[str, Any]]) -> None:
+    """覆寫寫入 BM25 語料檔。每筆應含 id, text, source, chunk_index，可選 chat_id。"""
+    path = get_bm25_corpus_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out = []
+    for c in chunks:
+        out.append({
+            "id": str(c.get("id", "")),
+            "text": str(c.get("text", "")),
+            "source": str(c.get("source", "")),
+            "chunk_index": int(c.get("chunk_index", 0)),
+            "chat_id": c.get("chat_id"),
+        })
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=0)
+
+
+def append_bm25_corpus(chunks: list[dict[str, Any]]) -> None:
+    """將新 chunks 追加至 BM25 語料檔。每筆應含 id, text, source, chunk_index，可選 chat_id。"""
+    existing = load_bm25_corpus()
+    for c in chunks:
+        existing.append({
+            "id": str(c.get("id", "")),
+            "text": str(c.get("text", "")),
+            "source": str(c.get("source", "")),
+            "chunk_index": int(c.get("chunk_index", 0)),
+            "chat_id": c.get("chat_id"),
+        })
+    save_bm25_corpus(existing)
+
+
+def build_bm25_index(corpus: list[dict[str, Any]]):
+    """依語料建 BM25 索引。回傳 (bm25, tokenized_corpus, corpus_by_id)。corpus 為空則回傳 (None, [], {})。"""
+    if not corpus:
+        return None, [], {}
+    try:
+        from rank_bm25 import BM25Okapi
+    except ImportError:
+        return None, [], {c["id"]: c for c in corpus}
+    tokenized = [_bm25_tokenize(c.get("text") or "") for c in corpus]
+    bm25 = BM25Okapi(tokenized)
+    corpus_by_id = {c["id"]: c for c in corpus}
+    return bm25, tokenized, corpus_by_id
+
+
+def bm25_search(
+    bm25,
+    corpus: list[dict[str, Any]],
+    query: str,
+    top_k: int = 20,
+    filter_chat_id: str | None = None,
+) -> list[tuple[str, float]]:
+    """BM25 檢索，回傳 [(chunk_id, score), ...]。filter_chat_id 若設定則只保留該 chat 的 chunk。"""
+    if bm25 is None or not corpus or not (query or "").strip():
+        return []
+    import numpy as np
+    query_tokens = _bm25_tokenize(query.strip())
+    if not query_tokens:
+        return []
+    scores = bm25.get_scores(query_tokens)
+    indices = np.argsort(scores)[::-1]
+    out: list[tuple[str, float]] = []
+    for i in indices:
+        if scores[i] <= 0:
+            break
+        c = corpus[i]
+        cid = c.get("id")
+        if not cid:
+            continue
+        if filter_chat_id is not None:
+            if c.get("chat_id") != filter_chat_id:
+                continue
+        out.append((cid, float(scores[i])))
+        if len(out) >= top_k:
+            break
+    return out
+
+
+def merge_hybrid_rrf(
+    vector_matches: list[dict[str, Any]],
+    bm25_id_scores: list[tuple[str, float]],
+    corpus_by_id: dict[str, dict[str, Any]],
+    k: int = 60,
+) -> list[dict[str, Any]]:
+    """RRF 合併向量與 BM25 結果。回傳與 Pinecone 相同結構：{id, score, metadata: {text, source, chunk_index}}。"""
+    rrf_scores: dict[str, float] = {}
+    for rank, m in enumerate(vector_matches, start=1):
+        mid = m.get("id")
+        if not mid:
+            continue
+        rrf_scores[mid] = rrf_scores.get(mid, 0.0) + 1.0 / (k + rank)
+    for rank, (cid, _) in enumerate(bm25_id_scores, start=1):
+        rrf_scores[cid] = rrf_scores.get(cid, 0.0) + 1.0 / (k + rank)
+    # 依 RRF 分數排序
+    ordered_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
+    vector_by_id = {m["id"]: m for m in vector_matches if m.get("id")}
+    result: list[dict[str, Any]] = []
+    for cid in ordered_ids:
+        rrf = rrf_scores[cid]
+        if cid in vector_by_id:
+            m = vector_by_id[cid]
+            meta = m.get("metadata") or {}
+        else:
+            meta = (corpus_by_id.get(cid) or {})
+            meta = {"text": meta.get("text", ""), "source": meta.get("source", ""), "chunk_index": meta.get("chunk_index", 0)}
+        result.append({"id": cid, "score": rrf, "metadata": meta})
+    return result

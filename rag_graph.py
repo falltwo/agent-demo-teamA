@@ -16,9 +16,15 @@ from google.genai import types
 from langgraph.graph import END, StateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
-from rag_common import embed_query as _embed_query_common
-from rag_common import format_context as _format_context_common
-from rag_common import get_clients_and_index
+from rag_common import (
+    build_bm25_index,
+    bm25_search,
+    embed_query as _embed_query_common,
+    format_context as _format_context_common,
+    get_clients_and_index,
+    load_bm25_corpus,
+    merge_hybrid_rrf,
+)
 
 
 class _RAGStateRequired(TypedDict):
@@ -408,8 +414,26 @@ def _build_graph():
                         reverse=True,
                     )[:merge_cap]
 
+            # Hybrid：向量 + BM25，RRF 合併（RAG_USE_BM25=1 且語料存在時）
+            did_hybrid = False
+            use_bm25 = os.getenv("RAG_USE_BM25", "").strip().lower() in ("1", "true", "yes")
+            if use_bm25 and raw_matches:
+                corpus = load_bm25_corpus()
+                if corpus:
+                    bm25, _tokenized, corpus_by_id = build_bm25_index(corpus)
+                    if bm25 is not None:
+                        top_k_bm25 = min(int(os.getenv("RAG_BM25_TOP_K", "20")), 50)
+                        bm25_pairs = bm25_search(
+                            bm25, corpus, query_for_embed, top_k=top_k_bm25, filter_chat_id=filter_chat_id
+                        )
+                        k_rrf = int(os.getenv("RAG_RRF_K", "60"))
+                        raw_matches = merge_hybrid_rrf(raw_matches, bm25_pairs, corpus_by_id, k=k_rrf)
+                        did_hybrid = True
+
             min_score_env = os.getenv("RAG_MIN_SCORE")
             min_score = float(min_score_env) if min_score_env is not None else 0.0
+            if did_hybrid:
+                min_score = 0.0  # RRF 分數非 cosine，不依門檻過濾
             filtered_matches = [m for m in raw_matches if m.get("score") is None or m.get("score") >= min_score]
 
             if os.getenv("RAG_DEDUP_ENABLED", "").strip().lower() in ("1", "true", "yes"):
@@ -665,8 +689,20 @@ def retrieve_only(
     if not raw_matches:
         return "(無檢索內容)", [], [], None
 
+    did_hybrid = False
+    if os.getenv("RAG_USE_BM25", "").strip().lower() in ("1", "true", "yes"):
+        corpus = load_bm25_corpus()
+        if corpus:
+            bm25, _tok, corpus_by_id = build_bm25_index(corpus)
+            if bm25 is not None:
+                top_k_bm25 = min(int(os.getenv("RAG_BM25_TOP_K", "20")), 50)
+                bm25_pairs = bm25_search(bm25, corpus, question, top_k=top_k_bm25, filter_chat_id=chat_id)
+                k_rrf = int(os.getenv("RAG_RRF_K", "60"))
+                raw_matches = merge_hybrid_rrf(raw_matches, bm25_pairs, corpus_by_id, k=k_rrf)
+                did_hybrid = True
+
     min_score_env = os.getenv("RAG_MIN_SCORE")
-    min_score = float(min_score_env) if min_score_env is not None else 0.0
+    min_score = 0.0 if did_hybrid else (float(min_score_env) if min_score_env is not None else 0.0)
     filtered_matches: list[dict[str, Any]] = []
     for m in raw_matches:
         score = m.get("score")

@@ -139,20 +139,45 @@ def tw_law_intent(question: str) -> Tuple[str, Dict[str, Any]] | None:
 
 
 def contract_risk_with_law_intent(question: str) -> Tuple[str, Dict[str, Any]] | None:
-    """使用者要「審閱合約」或任何合約／契約分析時，優先走「合約＋法條查詢」整合流程，確保會查司法院／Tavily 並把外部連結列入來源。"""
+    """使用者要「審閱合約」或合約／契約＋風險／法條時，走「合約＋法條查詢」整合流程（RAG ＋ 抽法條 ＋ Tavily 查司法院）。"""
     if not question or not question.strip():
         return None
     q = question.strip()
-    # 審閱合約、合約風險、合約＋法條／法律 等一律走完整流程（合約 RAG ＋ 抽法條 ＋ Tavily 查司法院）
+    # 審閱＋合約／契約
     if "審閱" in q and ("合約" in q or "契約" in q):
         return ("contract_risk_with_law_search", {})
-    if "合約" in q and ("風險" in q or "法條" in q or "法律" in q or "條文" in q or "民法" in q or "消保法" in q or "司法院" in q or "條例" in q):
+    # 合約／契約 ＋ 風險／法條／法律／條文 等（含「這份合約有什麼風險」）
+    if ("合約" in q or "契約" in q) and (
+        "風險" in q or "法條" in q or "法律" in q or "條文" in q or "民法" in q or "消保法" in q or "司法院" in q or "條例" in q
+    ):
         return ("contract_risk_with_law_search", {})
-    # 合約／契約／租賃 ＋ 分析／檢查／評估／看看 等也走完整流程，確保觸發 Tavily 查司法院與網路條文
+    # 採購＋契約／合約／風險／審閱／法條
+    if "採購" in q and ("契約" in q or "合約" in q or "風險" in q or "審閱" in q or "法條" in q):
+        return ("contract_risk_with_law_search", {})
+    # 標案＋風險／審閱／條款
+    if "標案" in q and ("風險" in q or "審閱" in q or "條款" in q):
+        return ("contract_risk_with_law_search", {})
+    # 「對我方不利的條款」等
+    if ("不利" in q or "不利於" in q) and ("條款" in q or "契約" in q or "合約" in q):
+        return ("contract_risk_with_law_search", {})
+    # 合約／契約／租賃 ＋ 分析／檢查／評估／看看 等也走完整流程
     if any(term in q for term in ("合約", "契約", "契約書", "租賃契約")) and any(
         k in q for k in ("分析", "檢查", "評估", "看看", "幫我看", "審閱", "風險", "法條", "法律")
     ):
         return ("contract_risk_with_law_search", {})
+    return None
+
+
+def contract_risk_agent_intent(question: str) -> Tuple[str, Dict[str, Any]] | None:
+    """合約／採購審閱類問句但未命中「含法條查詢」時，保證走 contract_risk_agent（僅知識庫），減少路由歧義。"""
+    if not question or not question.strip():
+        return None
+    q = question.strip()
+    # 合約／契約／採購／標案／租賃 ＋ 審閱／分析／檢查／評估／看看／幫我看／條款／有什麼／哪些／風險
+    contract_terms = ("合約", "契約", "契約書", "採購", "租賃契約", "租賃", "標案")
+    action_terms = ("審閱", "分析", "檢查", "評估", "看看", "幫我看", "條款", "有什麼", "有哪些", "風險", "不利")
+    if any(t in q for t in contract_terms) and any(k in q for k in action_terms):
+        return ("contract_risk_agent", {})
     return None
 
 
@@ -277,12 +302,13 @@ def _contract_risk_with_law_search_impl(
     question: str,
     top_k: int,
     history: List[Dict[str, Any]] | None,
+    chat_id: str | None = None,
 ) -> Tuple[str, List[str], List[Dict[str, Any]]]:
     """
     流程：1) RAG 取合約 2) 抽出法條字號 3) 逐條查司法院 4) 合併 context 後由 LLM 做風險評估。
-    回傳 (answer, sources, chunks)。sources 含合約 chunk 標籤＋外部 URL。
+    回傳 (answer, sources, chunks)。sources 含合約 chunk 標籤＋外部 URL。chat_id 若設定則僅檢索該對話上傳的 chunks。
     """
-    context_rag, sources_rag, chunks_rag, _ = retrieve_only(question=question, top_k=max(top_k, 14))
+    context_rag, sources_rag, chunks_rag, _ = retrieve_only(question=question, top_k=max(top_k, 14), chat_id=chat_id)
     if not context_rag or context_rag.strip() == "(無檢索內容)" or not chunks_rag:
         return (
             "目前知識庫中沒有與合約相關的內容。請先上傳並灌入合約／採購文件，再使用「合約審閱（含法條查詢）」功能。",
@@ -590,9 +616,9 @@ def _decide_tool(
         "16) financial_report_agent → 問題明顯是「財報、營收、毛利、淨利、法說會、公司營運、EPS、現金流」等；交給財報專家子 Agent 回答，強調指標說明與風險提示，tool_args 可為 {}。\n"
         "17) esg_agent → 問題明顯是「ESG、環境社會治理、訴訟、供應鏈風險、法遵、裁罰、風險揭露」等；交給 ESG／風險法遵專家子 Agent 回答，tool_args 可為 {}。\n"
         "18) data_analyst_agent → 使用者要「分析這份資料、報表摘要、數據趨勢、從內容裡整理數字」等；交給資料分析專家，依檢索內容做數據摘要與重點發現，tool_args 可為 {}。\n"
-        "19) contract_risk_agent → 問題明顯是在「審閱合約、採購文件、標案文件、政府採購、契約條款風險」等；交給合約／採購法遵專家子 Agent，輸出條款類型、風險等級與建議調整方向，tool_args 可為 {}。\n"
+        "19) contract_risk_agent → 【僅知識庫】問題明顯是「審閱合約、採購文件、標案、契約條款風險」等；交給合約／採購法遵專家，依知識庫檢索產出條款類型、風險等級與建議，不查司法院或外部法條，tool_args 可為 {}。\n"
         "20) tw_law_web_search → 問題明顯是在詢問「適用的法律條文、臺灣民法／政府採購法／行政程序法等法規內容」，或提到「司法院法學資料檢索系統」「judicial.gov.tw」等，需上網查臺灣法律條文；會優先搜尋 judicial.gov.tw，tool_args 可含 {\"query\": \"關鍵字\"}。\n"
-        "21) contract_risk_with_law_search → 使用者要「審閱合約且結合法條查詢」「合約風險評估並查相關法條」；系統會先從知識庫取合約、抽出法條字號、再上網查司法院等來源、最後整合產出風險評估與法條重點，tool_args 可為 {}。\n"
+        "21) contract_risk_with_law_search → 【含法條查詢】使用者要「審閱合約且結合法條查詢」「合約風險評估並查相關法條」；系統會從知識庫取合約、抽出法條字號、上網查司法院等、整合產出風險評估與法條重點並附 AI 自檢與免責聲明，tool_args 可為 {}。與 19 差異：19 僅依知識庫，21 會查外部法條。\n"
         "請嚴格輸出一段 JSON，格式例如：\n"
         '  {\"tool\": \"rag_search\", \"tool_args\": {}}\n'
         "或 {\"tool\": \"research\", \"tool_args\": {}}\n"
@@ -754,6 +780,11 @@ def route_and_answer(
         intent = contract_risk_with_law_intent(question)
         if intent is not None:
             tool, tool_args = intent
+    # 合約／採購審閱類但未命中法條查詢時，保證走 contract_risk_agent（僅知識庫），減少路由歧義
+    if tool is None:
+        intent = contract_risk_agent_intent(question)
+        if intent is not None:
+            tool, tool_args = intent
     if tool is None:
         client, llm_model = _init_llm_client()
         tool, tool_args = _decide_tool(client, llm_model, question, history)
@@ -875,7 +906,7 @@ def route_and_answer(
     if tool == "contract_risk_with_law_search":
         top_k_expert = max(top_k, int(tool_args.get("top_k") or top_k))
         answer, sources, chunks = _contract_risk_with_law_search_impl(
-            question=question, top_k=top_k_expert, history=history
+            question=question, top_k=top_k_expert, history=history, chat_id=rag_scope_chat_id
         )
         return answer, sources, chunks, "contract_risk_with_law_search", None
 

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 from google import genai
 from pypdf import PdfReader
 
-from rag_common import chunk_text, embed_texts, get_clients_and_index, stable_id
+from rag_common import chunk_text, embed_texts, get_clients_and_index, save_bm25_corpus, stable_id
 from sources_registry import update_registry_on_ingest
 
 
@@ -27,9 +27,21 @@ def iter_text_files(root: Path) -> list[Path]:
         return []
     out: list[Path] = []
     for p in root.rglob("*"):
-        if p.is_file() and p.suffix.lower() in {".txt", ".md", ".pdf"}:
+        if p.is_file() and p.suffix.lower() in {".txt", ".md", ".pdf", ".docx"}:
             out.append(p)
     return out
+
+
+def extract_text_from_docx(path: Path) -> str:
+    """從 Word .docx 擷取段落文字。"""
+    try:
+        from docx import Document
+        doc = Document(path)
+        parts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        return "\n\n".join(parts)
+    except Exception as e:
+        logger.warning("extract_text_from_docx failed for %s: %s", path, e, exc_info=True)
+        return ""
 
 
 def extract_text_from_pdf(path: Path) -> str:
@@ -55,7 +67,7 @@ def main() -> None:
     data_dir = Path(os.getenv("RAG_DATA_DIR", "data"))
     files = iter_text_files(data_dir)
     if not files:
-        raise RuntimeError(f"找不到可灌入的檔案：{data_dir.resolve()}（支援 .txt/.md/.pdf）")
+        raise RuntimeError(f"找不到可灌入的檔案：{data_dir.resolve()}（支援 .txt/.md/.pdf/.docx）")
 
     _chat_client, embed_client, index, dim, _llm_model, embed_model, index_name = get_clients_and_index()
 
@@ -64,6 +76,8 @@ def main() -> None:
         suffix = f.suffix.lower()
         if suffix == ".pdf":
             text = extract_text_from_pdf(f)
+        elif suffix == ".docx":
+            text = extract_text_from_docx(f)
         else:
             text = f.read_text(encoding="utf-8", errors="ignore")
         if not text.strip():
@@ -110,7 +124,12 @@ def main() -> None:
     update_registry_on_ingest(
         [{"source": s, "chunk_count": n, "chat_id": None} for s, n in source_counts.items()]
     )
-    print(f"已灌入完成：{len(chunks)} chunks → {index_name}")
+    # BM25 語料：離線灌入為全量覆寫（無 chat_id）
+    save_bm25_corpus([
+        {"id": c.id, "text": c.text, "source": c.source, "chunk_index": c.chunk_index, "chat_id": None}
+        for c in chunks
+    ])
+    print(f"已灌入完成：{len(chunks)} chunks → {index_name}（含 BM25 語料）")
 
 
 if __name__ == "__main__":
