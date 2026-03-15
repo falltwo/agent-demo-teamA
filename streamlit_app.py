@@ -8,19 +8,21 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
+from dotenv import load_dotenv
 from google import genai
 from streamlit_echarts import st_echarts
 from pypdf import PdfReader
 
 from agent_router import route_and_answer
 from eval_log import is_enabled as eval_log_enabled, load_runs, log_run as eval_log_run
+from llm_client import get_chat_client_and_model
 from rag_common import (
     chunk_text,
     embed_texts,
     get_clients_and_index,
     stable_id,
 )
-from sources_registry import list_sources, update_registry_on_ingest
+from sources_registry import load_registry, save_registry, list_sources, update_registry_on_ingest
 
 
 def _inject_custom_css() -> None:
@@ -271,7 +273,7 @@ def _render_eval_batch_view() -> None:
 
 def ingest_uploaded_files(
     *,
-    gemini: genai.Client,
+    embed_client: genai.Client,
     index: Any,
     index_dim: int,
     embed_model: str,
@@ -323,7 +325,7 @@ def ingest_uploaded_files(
         return 0
 
     vectors = embed_texts(
-        gemini,
+        embed_client,
         all_texts,
         model=embed_model,
         output_dimensionality=index_dim,
@@ -363,7 +365,10 @@ def main() -> None:
     _inject_custom_css()
 
     try:
-        chat_client, embed_client, index, index_dim, llm_model, embed_model, index_name = _cached_get_clients_and_index()
+        chat_client, embed_client, index, index_dim, _cached_llm, embed_model, index_name = _cached_get_clients_and_index()
+        # 強制載入專案根目錄 .env，確保側欄與請求使用正確的 GEMINI_CHAT_MODEL
+        load_dotenv(Path(__file__).resolve().parent / ".env")
+        _, llm_model = get_chat_client_and_model()
     except Exception as e:
         st.error(f"初始化失敗：{e}")
         st.stop()
@@ -387,7 +392,7 @@ def main() -> None:
         st.caption(f"Chat model：`{llm_model}`")
         st.caption(f"Embed model：`{embed_model}`")
         top_k = st.slider("TOP_K", min_value=1, max_value=20, value=int(os.getenv("TOP_K", "5")), step=1)
-        strict_mode = st.checkbox("嚴格只根據知識庫回答", value=True)
+        strict_mode = st.checkbox("嚴格只根據知識庫回答", value=False, help="勾選時一律只依知識庫回答、不經合約／法條工具。合約審閱建議不勾選以啟用合約專家與法條查詢。")
         # 若此對話有上傳過檔案，預設勾選「只搜尋此對話上傳的檔案」，避免參考連結／檢索片段參雜其他來源
         has_uploads_here = len(list_sources(chat_id=active_conv_id)) > 0
         filter_by_chat = st.checkbox(
@@ -396,6 +401,16 @@ def main() -> None:
             help="勾選時，參考連結與檢索片段僅來自本對話上傳的檔案；不勾選則搜尋整個知識庫。",
         )
         rag_scope_chat_id = active_conv_id if filter_by_chat else None
+        with st.expander("合約審閱提示", expanded=True):
+            st.caption("上傳合約後可問：「請審閱這份合約的風險條款」「合約風險評估並查相關法條」，或使用下方一鍵審閱。")
+            if st.button("一鍵審閱（僅知識庫）", use_container_width=True, key="one_click_knowledge"):
+                st.session_state["one_click_review_question"] = "請根據目前已灌入的文件做合約條款分析與風險標註，僅依文件內容、不查外部法條。"
+                st.session_state["one_click_review_chat_id"] = active_conv_id
+                st.rerun()
+            if st.button("一鍵審閱（含法條查詢）", use_container_width=True, key="one_click_law"):
+                st.session_state["one_click_review_question"] = "請審閱這份合約的風險條款並查相關法條。"
+                st.session_state["one_click_review_chat_id"] = active_conv_id
+                st.rerun()
 
         st.divider()
         st.subheader("對話")
@@ -428,11 +443,21 @@ def main() -> None:
                 conversations[active_conv_id] = {"title": "新對話", "messages": []}
             st.rerun()
 
+        st.divider()
+        if st.button("清空資料庫", type="secondary", use_container_width=True, key="btn_clear_db"):
+            try:
+                index.delete(delete_all=True)
+                save_registry([])
+                st.success("已清空向量庫與來源註冊表。")
+            except Exception as e:
+                st.error(f"清空失敗：{e}")
+            st.rerun()
+
     # 主標題；Eval 頁改為情境化小標，對話頁保留完整副標
-    st.title("合約／採購法遵審閱助理")
+    st.title("合約／法遵審閱助理")
     if view == "對話":
         st.markdown(
-            '<p class="app-tagline">RAG · 圖表 · 多工具 Agent · 多輪對話</p>',
+            '<p class="app-tagline">RAG · 合約風險 · 法條查詢 · 知識庫問答 · 多輪對話</p>',
             unsafe_allow_html=True,
         )
     elif view == "Eval 運行記錄":
@@ -450,9 +475,12 @@ def main() -> None:
     if "messages" not in current_conv:
         current_conv["messages"] = []
 
-    # 空對話時顯示引導文案
+    # 空對話時顯示引導文案（強調合約審閱流程）
     if not current_conv["messages"]:
-        st.info("在下方輸入問題，或先展開「為此對話上傳並灌入文件」上傳 .txt / .md / .pdf 灌入知識庫後再問答。")
+        st.info(
+            "**合約審閱**：先展開「為此對話上傳並灌入文件」上傳合約 .pdf / .txt / .md，按「灌入到向量庫」後，"
+            "在側欄點「一鍵審閱」或輸入「請審閱這份合約的風險條款」即可。"
+        )
         st.markdown("")  # 小留白
 
     # 整理給模型用的對話歷史（只保留 role + content），傳入 RAG/專家以記得上下文
@@ -478,8 +506,11 @@ def main() -> None:
             _render_chart_chunks(msg)
             if msg.get("sources"):
                 _render_sources_expander(msg["sources"])
+            _is_contract_tool = msg.get("tool_name") in ("contract_risk_agent", "contract_risk_with_law_search")
+            if _is_contract_tool and msg.get("chunks"):
+                st.caption("以下為合約風險分析，可展開檢索片段對照原文。")
             if msg.get("chunks"):
-                with st.expander("查看檢索片段"):
+                with st.expander("查看檢索片段", expanded=_is_contract_tool):
                     for c in msg["chunks"]:
                         st.markdown(f"**{c['tag']}**\n\n{c['text']}")
 
@@ -500,7 +531,7 @@ def main() -> None:
             try:
                 with st.spinner("向量化並寫入 Pinecone 中…（檔案越大越久）"):
                     n = ingest_uploaded_files(
-                        gemini=embed_client,
+                        embed_client=embed_client,
                         index=index,
                         index_dim=index_dim,
                         embed_model=embed_model,
@@ -515,6 +546,10 @@ def main() -> None:
                 st.error(f"灌入失敗：{e}")
 
     question = st.chat_input("輸入你的問題…")
+    # 一鍵審閱：側欄按鈕觸發後，以預設問題當作本輪使用者輸入
+    if question is None and st.session_state.get("one_click_review_chat_id") == active_conv_id and st.session_state.get("one_click_review_question"):
+        question = st.session_state.pop("one_click_review_question", "")
+        st.session_state.pop("one_click_review_chat_id", None)
     if not question:
         return
 
@@ -565,6 +600,7 @@ def main() -> None:
             "content": answer or "(空回覆)",
             "sources": sources,
             "chunks": chunks,
+            "tool_name": tool_name,
             "chart_option": (extra or {}).get("chart_option"),
             "chart_image_base64": (extra or {}).get("chart_image_base64"),
             "chart_chunks": (extra or {}).get("chart_chunks"),
@@ -611,6 +647,7 @@ def main() -> None:
             "content": answer or "(空回覆)",
             "sources": sources,
             "chunks": chunks,
+            "tool_name": tool_name,
             "chart_option": (extra or {}).get("chart_option"),
             "chart_image_base64": (extra or {}).get("chart_image_base64"),
             "chart_chunks": (extra or {}).get("chart_chunks"),
@@ -643,8 +680,11 @@ def main() -> None:
         _render_chart_chunks(extra)
         if sources:
             _render_sources_expander(sources)
+        _contract_tool = tool_name in ("contract_risk_agent", "contract_risk_with_law_search")
+        if _contract_tool and chunks:
+            st.caption("以下為合約風險分析，可展開檢索片段對照原文。")
         if chunks:
-            with st.expander("查看檢索片段"):
+            with st.expander("查看檢索片段", expanded=_contract_tool):
                 for c in chunks:
                     st.markdown(f"**{c['tag']}**\n\n{c['text']}")
 
@@ -660,6 +700,7 @@ def main() -> None:
         "content": answer or "(空回覆)",
         "sources": sources,
         "chunks": chunks,
+        "tool_name": tool_name,
         "chart_option": (extra or {}).get("chart_option"),
         "chart_image_base64": (extra or {}).get("chart_image_base64"),
         "chart_chunks": (extra or {}).get("chart_chunks"),
