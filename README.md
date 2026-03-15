@@ -1,40 +1,31 @@
-# Agent-DEMO（範本）
+# 合約／採購法遵審閱助理（Contract & Compliance Review Agent）
 
-> 這個 repo 是我們組內的 **範本專案**，給組員 fork / 使用 template 後，快速建立自己的「知識庫問答 + 多工具 Agent」服務。
+> **競賽導向**：本專案以「2026 智慧創新大賞」AI 應用類為目標，定位為 **合約與採購法遵審閱助理** —— 結合 RAG、多工具 Agent 路由與合約／法律檢索，協助企業快速審閱合約條款、標註風險並可追溯條文出處。
 >
-> 以 RAG 為核心的智慧問答 Agent：結合 LLM 與向量檢索，支援知識庫問答、網路搜尋、網頁擷取、圖表生成與多工具路由，並提供 Eval 框架與網頁檢視。
+> 以 **RAG + LangGraph** 為核心，支援知識庫問答、**合約風險分析**（含司法院法條查詢）、網路搜尋、網頁擷取、圖表與 Eval 框架；前端為 Streamlit 多對話介面。
 
 ---
 
+## 快速開始
 
+- **環境變數與 API Key（必填）**
+  - 複製 `.env.example` 為 `.env`，填入真實 key（勿 commit 上傳）：
+    - **必填**：`PINECONE_API_KEY`、`PINECONE_INDEX`、`GOOGLE_API_KEY`
+    - **合約＋法條查詢**：`TAVILY_API_KEY`（用於司法院／網路搜尋）
+    - 選用：`FIRECRAWL_API_KEY`、`GROQ_API_KEY`（Eval 用）
 
-- **這個 repo 怎麼用**
-  - 到 GitHub 上 **fork** 或點 `Use this template` 建立自己的專案。
-  - 之後只維護自己的 repo，不要直接在這個範本上改。
-
-- **環境變數與 API Key（超重要）**
-  - 專案內的 `.env.example` 是**示範檔**，裡面都是假的值，請依照自己帳號改：
-    - `PINECONE_API_KEY=your_pinecone_api_key_here`
-    - `GOOGLE_API_KEY=your_google_api_key_here`
-    - `TAVILY_API_KEY=your_tavily_api_key_here`
-    - `FIRECRAWL_API_KEY=your_firecrawl_api_key_here`
-    - `GROQ_API_KEY=your_groq_api_key_here`
-  - 實際開發時：
-    - 在本機建立 `.env` 或 `.env.local` 來放**真實 key**。
-    - 確認 `.env` / `.env.local` 都有被列在 `.gitignore`，**不要把真實 key commit / push 上 GitHub**。
-
-- **跑起來的最短步驟**
-  1. 建立自己的 repo（fork / template）。
-  2. `cp .env.example .env`，在 `.env` 裡填入自己帳號的 API key。
-  3. 建好 Pinecone index，準備好要放到知識庫的檔案放在 `data/`。
-  4. 在專案根目錄執行：
+- **最短步驟**
+  1. `cp .env.example .env`，填入 API key。
+  2. 將合約或文件放入 `data/`，建好 Pinecone index。
+  3. 執行：
      ```bash
      uv run rag_ingest.py
      uv run streamlit run streamlit_app.py
      ```
-  5. 瀏覽器打開 Streamlit 顯示的網址，就可以開始問問題、看檢索結果與圖表。
+  4. 在瀏覽器開啟 Streamlit，上傳合約後可問：「請審閱這份合約的風險條款」「合約風險評估並查相關法條」等。
 
-> 下面開始是原本比較完整的技術與架構說明，需要理解細節或要擴充功能再往下看即可。
+- **合約審閱建議環境變數**（見 [五、進階與備註](#五進階與備註)）
+  - `RAG_USE_HISTORY_FOR_QUERY=1`、`RAG_MULTI_QUERY=1`、`RAG_MAX_HISTORY_TURNS=12` 可提升多輪審閱與交叉比對效果。
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit)](https://streamlit.io)
@@ -55,77 +46,17 @@
 - [進階與備註](#五進階與備註)
 - [開發與測試](#六開發與測試)
 - [建議可增加的擴充](#七建議可增加的擴充)
-- [更新記錄（lawtools 分支）](#更新記錄lawtools-分支)
-
----
-
-## 更新記錄（lawtools 分支）
-
-### 與 main 的關係
-
-**lawtools** 分支的**程式碼與 main 一致**，未對既有模組做改動。本分支用於在此基礎上進行的**爬蟲**與**法律條例調查**等更新工作，以下記錄在此分支實際使用的**程式更新流程**。
-
-### 本分支的更新工作內容
-
-- **爬蟲**：使用專案既有工具（如 **Firecrawl**：`scrape_url`、`search_and_scrape`、`crawl_site`、`map_domain`）擷取法規、判決或法務相關網頁，取得條文或說明文字。
-- **法律條例調查**：結合 RAG 知識庫、網路搜尋（Tavily）與網頁擷取（Firecrawl），對法規、條例、函釋等進行查詢與整理，並透過 Agent 路由決定用「知識庫檢索」或「即時擷取／搜尋」回答。
-- **Tools 擴充**：本分支若有新增或修改與法律／法遵相關的 tool 或專家 Agent，請在下方「本分支與 tools 相關的擴充」列出，以與 main 既有工具區分。
-
-#### 本分支與 tools 相關的擴充（請依實際新增項目填寫）
-
-若你在本分支有**新增或修改**任何 tool（例如法規查詢、條例檢索、法遵專家 Agent、自訂工具模組等），請在此列出，方便與 main 既有工具對照：
-
-| 類型 | 名稱／識別 | 檔案或模組 | 說明 |
-|------|------------|------------|------|
-| 專家 Agent | `contract_risk_agent` | `expert_agents.py` | 合約／採購法遵審閱：依知識庫檢索產出條款類型、風險等級與建議。 |
-| 整合流程 | `contract_risk_with_law_search` | `agent_router.py` | 合約審閱＋法條查詢：RAG 取合約 → 抽法條字號 → **Tavily** 查司法院／網路條文 → **Firecrawl** 法條對比 → LLM 風險評估 → **AI 自檢** → **免責聲明**。 |
-
-- 若尚未 commit，可先在此填寫預定名稱與說明，之後補上對應程式再更新本表。
-- 既有 **SUPPORTED_TOOLS** 在 `agent_router.py`；若新增 tool，需在該處加入名稱並在路由與執行分支實作對應邏輯；`tools/__init__.py` 目前從 `agent_router.SUPPORTED_TOOLS` 匯出，無需重複註冊。
-
-### 程式更新流程（本分支實際使用）
-
-1. **環境與 API key**  
-   與 main 相同：`uv` + `.env`（含 `FIRECRAWL_API_KEY`、`GOOGLE_API_KEY`、`PINECONE_API_KEY`、`TAVILY_API_KEY` 等）。爬蟲與法規擷取需至少具備 Firecrawl（與必要時 Tavily）。**合約審閱＋法條查詢**需 `TAVILY_API_KEY`（查司法院／網路條文）與選用 `FIRECRAWL_API_KEY`（法條對比擷取）。
-
-2. **爬蟲擷取法規／條例來源**  
-   - **單頁**：用 `firecrawl_tools.scrape_url(url)` 擷取指定法規頁面，取得 Markdown 或文字。  
-   - **關鍵字／主題**：用 `firecrawl_tools.search_and_scrape(query, limit=…)` 搜尋並擷取多筆頁面（例如「某法 第幾條」、「某函釋」）。  
-   - **整站**：若有法規網站需整站爬取，用 `firecrawl_tools.crawl_site(start_url, limit=…)`（注意逾時與 API 用量）。  
-   擷取結果可存成檔案放入 `data/`，供後續灌入知識庫。
-
-3. **灌入知識庫**  
-   將擷取或整理好的法規／條例文件（txt、md、pdf）放入 `data/`，執行 `uv run rag_ingest.py` → 切 chunk、embed、寫入 Pinecone，更新 `sources_registry.json`。之後即可用 RAG 做「條例問答」。合約審閱時會從知識庫取合約內容並抽出法條字號。
-
-4. **合約審閱＋法條查詢（變更流程）**  
-   當使用者問題符合「審閱合約」「合約風險」「分析／檢查／評估 合約／契約／租賃契約」等意圖時，系統走 **contract_risk_with_law_search**，流程如下：
-   - **1) RAG 取合約**：從 Pinecone 檢索使用者上傳的合約／文件，組成 context。
-   - **2) 抽法條字號**：以正則從檢索內容抽出「法律名稱＋條號」（如民法第 421 條、消費者保護法、租賃住宅市場發展及管理條例等）。
-   - **3) Tavily 查司法院／網路條文**：對每筆法條字號查詢 `{法條} site:judicial.gov.tw`，取得條文與實務見解；若未抽到法條則以「成屋買賣 民法／消保法」等後備查詢。需設定 `TAVILY_API_KEY` 才會執行。
-   - **4) Firecrawl 法條對比**（選用）：以法條字號搜尋「全國法規資料庫 OR 司法院」並擷取頁面內容，與合約引用對照以增加可信度。需設定 `FIRECRAWL_API_KEY` 才會執行。
-   - **5) LLM 風險評估**：依「合約檢索內容」＋「查詢到的相關條文」＋「爬蟲擷取之法條對比」產出：合約條款風險摘要、相關法條重點、風險提醒與建議、法條字號清單、來源列表。
-   - **6) AI 自檢**：由 LLM 對回答做一致性檢查（與合約／法條摘要是否一致、建議人工再確認之處、具體建議），結果附於文末。
-   - **7) 免責聲明**：系統於回答結尾強制附加「本分析僅供內部風險初步檢視與參考，不能視為正式法律意見，重要合約仍應由執業律師審閱。」
-
-5. **法律條例調查（問答流程）**  
-   啟動 `uv run streamlit run streamlit_app.py`，在介面提問：  
-   - 若問題為**合約／契約審閱、分析、風險、法條**（見上節）→ 走 **contract_risk_with_law_search**（Tavily ＋ 選用 Firecrawl）。  
-   - 若問題偏向「已知知識庫內的法規／條例」→ Agent 會選 `rag_search`／`research`，從 Pinecone 檢索後生成答案。  
-   - 若需「即時網路上的法規、函釋、判決」→ Agent 會選 `web_search` 或 `firecrawl_search`（擷取搜尋結果頁面），再回傳整理結果。  
-   流程與 main 相同：`agent_router.route_and_answer()` 依問題決定工具；**若你已在本分支新增法規／法遵相關 tool 或專家 Agent**（並已加入 `SUPPORTED_TOOLS` 與路由邏輯），Agent 會多出對應選項，請在上方「本分支與 tools 相關的擴充」表格中列出名稱與說明。
-
-6. **後續可擴充**  
-   若本分支後續新增「法規專用 tool」或「法遵／法務專家 Agent」，可在此節補上對應檔案與呼叫流程。
+- [更新記錄（Recent Updates）](#更新記錄recent-updates)
 
 ---
 
 ## 一、專案概述
 
-本專案是 **「知識庫問答 + 多工具 Agent 路由」** 的示範系統：
+本專案為 **「合約／採購法遵審閱助理」**，在知識庫問答與多工具 Agent 基礎上，強化合約與法律檢索：
 
-- 使用者可**上傳文件**建立知識庫，以**自然語言**提問
-- 系統會**自動選擇**要查知識庫、查網路、擷取網頁、畫圖表或呼叫公司工具（財報計算、日期解析、季度計畫等）
-- 在 **Streamlit** 網頁上完成對話、檢索結果與 **Eval 批次結果** 的展示
+- **合約審閱**：上傳合約或採購文件至知識庫，以自然語言提問；系統可自動路由至 **contract_risk_agent**（條款風險、建議調整）或 **contract_risk_with_law_search**（合約 + 司法院法條查詢 + 風險評估 + AI 自檢）。
+- **多工具路由**：依問題意圖選擇知識庫 RAG、網路搜尋、網頁擷取、圖表、財報／ESG／資料分析專家等；**tw_law_web_search** 針對臺灣法規（優先 judicial.gov.tw）。
+- **Streamlit** 提供多對話、嚴格／非嚴格模式、上傳灌入、檢索片段與 **Eval 運行記錄／批次結果** 檢視。
 
 ---
 
@@ -156,7 +87,7 @@
 | **sources_registry.py** | 來源註冊表（JSON），記錄每個 source 與 chunk 數，供 `list_sources` 使用。 |
 | **streamlit_app.py** | Streamlit 介面：多對話、嚴格／非嚴格模式、上傳灌入、檢索片段與圖表、**Eval 運行記錄**、**Eval 批次結果**。 |
 | **company_tools.py** | 公司工具：財報指標計算、日期解析、季度計畫表。 |
-| **expert_agents.py** | 專家子 Agent：財報／營運（FinancialReportAgent）、ESG／法遵（ESGAgent）。 |
+| **expert_agents.py** | 專家子 Agent：財報／營運（financial_report_agent）、ESG／法遵（esg_agent）、資料分析（data_analyst_agent）、合約法遵審閱（contract_risk_agent）。 |
 | **echarts_tools.py** / **echarts_mcp_client.py** | 圖表 option 產生與可選 MCP PNG 輸出。 |
 | **firecrawl_tools.py** | Firecrawl API 封裝（scrape、search、crawl、map）。 |
 | **eval_log.py** | 問答運行記錄（可選寫入每筆問題／答案／tool／延遲）。 |
@@ -168,11 +99,17 @@
 |------|------|
 | **知識庫** | `rag_search`、`research`、`list_sources`、`search_similar`、`summarize_source` |
 | **網路／網頁** | `web_search`、`scrape_url`、`firecrawl_search` |
+| **合約／法律** | `contract_risk_agent`、`contract_risk_with_law_search`、`tw_law_web_search` |
 | **圖表** | `create_chart`、`analyze_and_chart` |
 | **公司工具** | `financial_metrics`、`parse_dates_from_text`、`generate_quarterly_plan` |
-| **專家** | `financial_report_agent`、`esg_agent`、`contract_risk_agent` |
+<<<<<<< HEAD
+| **專家** | `financial_report_agent`、`esg_agent`、`data_analyst_agent`、`contract_risk_agent` |
 | **合約＋法條** | `contract_risk_with_law_search`（RAG → 抽法條 → Tavily 司法院／網路 → Firecrawl 對比 → 自檢 → 免責聲明） |
 | **對話** | `small_talk`、`ask_web_vs_rag` |
+
+- **contract_risk_agent**：合約／採購條款風險分析，依知識庫檢索產出條款類型、風險等級與建議。
+- **contract_risk_with_law_search**：合約 RAG → 抽出法條字號 → 查司法院／網路 → 整合風險評估與法條重點，並附 AI 自檢。
+- **tw_law_web_search**：臺灣法規查詢，優先搜尋 `site:judicial.gov.tw`。
 
 ### 2.4 整體問答流程（Workflow）
 
@@ -215,6 +152,8 @@ StateGraph(RAGState)
 - **retrieve**：embed 問題 → Pinecone 向量檢索（`internal_top_k`，預設 20）→ 依 `RAG_MIN_SCORE` 過濾 → 可選 dedup（`RAG_DEDUP_ENABLED`）→ **MMR** 或 **LLM rerank** 取前 `rerank_top_n` → 組 context / sources / chunks。
 - **generate**：依 context + 對話歷史 + strict／非 strict 的 system prompt，呼叫 LLM 生成答案。
 
+**合約審閱流程（簡述）**：使用者上傳合約後，問「請審閱這份合約」→ Router 可選 **contract_risk_agent**（僅知識庫）或 **contract_risk_with_law_search**（知識庫 + 抽法條 + 查司法院 + 整合評估 + AI 自檢）。嚴格模式勾選時，一律走 RAG 僅依知識庫回答。
+
 ### 2.5 RAG 類型與切片方式
 
 | 項目 | 說明 |
@@ -231,7 +170,8 @@ StateGraph(RAGState)
 - **網路與網頁**：Tavily 一般搜尋、Firecrawl 單頁擷取與關鍵字搜尋擷取；意圖可由規則或可選 LLM 判斷。
 - **圖表**：依使用者描述或資料畫 ECharts；analyze_and_chart 從知識庫檢索後分析並可確認後產圖，可選 ECharts MCP 產 PNG。
 - **公司工具**：財報指標計算、從文字解析日期、產生季度計畫表。
-- **專家**：財報／營運、ESG／法遵、合約／採購法遵（contract_risk_agent）專用回答。
+<<<<<<< HEAD
+- **專家**：財報／營運、ESG／法遵、資料分析（報表摘要／數據趨勢）、合約法遵審閱（條款、風險、民法／消保法）專用回答。
 - **合約審閱＋法條查詢**：問題為審閱合約、合約風險或分析／檢查契約時，走 **contract_risk_with_law_search**：RAG 取合約 → 抽法條字號 → **Tavily** 查司法院／網路條文與實務 → **Firecrawl** 擷取法條對比（選用）→ LLM 產出風險摘要、法條重點、建議、法條字號清單與來源列表 → **AI 自檢**（一致性與具體建議）→ 文末強制附加**免責聲明**。需 `TAVILY_API_KEY`（與選用 `FIRECRAWL_API_KEY`）。
 - **前端**：多對話、嚴格／非嚴格模式、上傳並灌入文件、檢索片段與圖表展示、**清空資料庫**按鈕；側欄可切換「對話」「Eval 運行記錄」「Eval 批次結果」。
 
@@ -294,11 +234,13 @@ uv run streamlit run streamlit_app.py
 
 ```bash
 uv run python eval/run_eval.py
+# 合約／法律專用題集（contract_risk_agent、contract_risk_with_law_search、tw_law_web_search）：
+uv run python eval/run_eval.py --eval-set eval/eval_set_contract.json
 # 使用 Groq（需 GROQ_API_KEY）：
 uv run python eval/run_eval.py --groq
 ```
 
-可選參數：`--eval-set eval/eval_set.json`、`--out-dir eval/runs`、`--top-k 5`。
+可選參數：`--eval-set eval/eval_set.json`（預設）或 `eval/eval_set_contract.json`、`--out-dir eval/runs`、`--top-k 5`。
 
 **輸出：** `eval/runs/run_<timestamp>_results.jsonl`、`run_<timestamp>_metrics.json`（routing 準確率、Tool 成功率、Latency P50/P95）。
 
@@ -308,6 +250,7 @@ uv run python eval/run_eval.py --groq
 
 ## 五、進階與備註
 
+- **合約審閱場景建議**：`RAG_USE_HISTORY_FOR_QUERY=1`（多輪指代）、`RAG_MULTI_QUERY=1`（交叉比對脈絡）、`RAG_MAX_HISTORY_TURNS=12`（或至少 6）；需法條查詢時請設定 `TAVILY_API_KEY`。
 - **檢索**：`RAG_DEDUP_ENABLED=1` 去重；`RAG_MMR_LAMBDA` 啟用 MMR；`RAG_INTERNAL_TOP_K`、`RAG_RERANK_TOP_N`、`RAG_MIN_SCORE` 等見程式或 .env。
 
   - **Dedup（去重）**：檢索回多筆片段後，先依內容 hash 或文字相似度（>0.98）剔除重複或幾乎相同的片段，避免同一段內容重複出現在 context 裡、浪費 token 並干擾回答。
@@ -371,9 +314,31 @@ uv run python eval/run_eval.py --groq
 
 ---
 
+## 更新記錄（Recent Updates）
+
+以下為專案分析後整理之架構要點與近期變更，便於新成員或 fork 後快速對齊現況。
+
+### 專案架構摘要
+
+- **定位**：RAG + 多工具 Agent + Streamlit 示範；以知識庫問答為核心，依問題自動路由至檢索、網路搜尋、網頁擷取、圖表、公司工具或專家子 Agent。
+- **技術棧**：Gemini（LLM + embedding）、Pinecone、LangGraph（RAG StateGraph）、Streamlit；可選 Tavily、Firecrawl、ECharts MCP。
+- **資料流**：使用者問題 → `agent_router` 決定工具 → 執行（如 `rag_graph.run_rag`、專家、web_search 等）→ 回傳答案與來源；RAG 為 retrieve → 過濾／去重／MMR 或 rerank → generate。
+- **文件**：`docs/` 內含 RAG 記憶與上下文、前端設計分析、專案與負責區塊完整度分析等；根目錄另有 `competition_notes_contract_ai.md` 競賽／合約 AI 筆記。
+
+### 近期更新（main 分支）
+
+| 項目 | 說明 |
+|------|------|
+| **合約／法律工具** | **tw_law_web_search**（臺灣法規，優先 judicial.gov.tw）、**contract_risk_with_law_search**（合約 RAG + 法條抽取 + 司法院查詢 + 風險評估 + AI 自檢）；意圖層 `tw_law_intent`、`contract_risk_with_law_intent` 強制路由。 |
+| **RAG 與 Agent** | `rag_graph.py` 雙 Prompt（調查員→判官）、多查詢檢索、rerank；`agent_router.py` 工具路由與 Firecrawl 意圖完善。 |
+| **專家** | **contract_risk_agent**、**data_analyst_agent**、財報／ESG 專家；合約專家具 15 年法務審查 prompt 與 strict／顧問雙模式。 |
+| **前端與設定** | `streamlit_app.py` 多對話、Eval 檢視；`assets/custom.css`；`.env.example` 含 RAG 記憶、多查詢、Gavel 等；競賽筆記 `competition_notes_contract_ai.md`。 |
+
+---
+
 ## 結語
 
-本專案整合 **RAG（Gemini + Pinecone + LangGraph）**、**多工具 Agent 路由**、**網路搜尋與網頁擷取（Tavily、Firecrawl）**、**ECharts 圖表**、**公司工具與專家子 Agent**，並以 **Streamlit** 提供多對話、上傳灌入與 **Eval 運行記錄／批次結果** 檢視；Eval 可選 Groq 避開 Gemini 免費額度限制，適合作為「知識庫 + 外部資訊 + 圖表 + 評估」的示範與延伸開發基礎。
+本專案以 **合約／採購法遵審閱** 為核心場景，整合 **RAG（Gemini + Pinecone + LangGraph）**、**多工具 Agent 路由**（含合約風險、法條查詢、司法院檢索）、**網路搜尋與網頁擷取（Tavily、Firecrawl）**、**ECharts 圖表** 與 **專家子 Agent**，並以 **Streamlit** 提供多對話、上傳灌入與 **Eval 運行記錄／批次結果** 檢視；適合作為競賽作品與「知識庫 + 合約審閱 + 法條檢索 + 評估」的延伸開發基礎。
 
 ---
 

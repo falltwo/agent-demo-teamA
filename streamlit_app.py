@@ -388,7 +388,17 @@ def main() -> None:
         st.caption(f"Chat model：`{llm_model}`")
         st.caption(f"Embed model：`{embed_model}`")
         top_k = st.slider("TOP_K", min_value=1, max_value=20, value=int(os.getenv("TOP_K", "5")), step=1)
-        strict_mode = st.checkbox("嚴格只根據知識庫回答", value=True)
+        strict_mode = st.checkbox("嚴格只根據知識庫回答", value=False, help="勾選時一律只依知識庫回答、不經合約／法條工具。合約審閱建議不勾選以啟用合約專家與法條查詢。")
+        with st.expander("合約審閱提示", expanded=True):
+            st.caption("上傳合約後可問：「請審閱這份合約的風險條款」「合約風險評估並查相關法條」，或使用下方一鍵審閱。")
+            if st.button("一鍵審閱（僅知識庫）", use_container_width=True, key="one_click_knowledge"):
+                st.session_state["one_click_review_question"] = "請根據目前已灌入的文件做合約條款分析與風險標註，僅依文件內容、不查外部法條。"
+                st.session_state["one_click_review_chat_id"] = active_conv_id
+                st.rerun()
+            if st.button("一鍵審閱（含法條查詢）", use_container_width=True, key="one_click_law"):
+                st.session_state["one_click_review_question"] = "請審閱這份合約的風險條款並查相關法條。"
+                st.session_state["one_click_review_chat_id"] = active_conv_id
+                st.rerun()
 
         st.divider()
         st.subheader("對話")
@@ -432,10 +442,10 @@ def main() -> None:
             st.rerun()
 
     # 主標題；Eval 頁改為情境化小標，對話頁保留完整副標
-    st.title("Agent-DEMO")
+    st.title("合約／法遵審閱助理")
     if view == "對話":
         st.markdown(
-            '<p class="app-tagline">RAG · 圖表 · 知識庫問答 · 多輪對話</p>',
+            '<p class="app-tagline">RAG · 合約風險 · 法條查詢 · 知識庫問答 · 多輪對話</p>',
             unsafe_allow_html=True,
         )
     elif view == "Eval 運行記錄":
@@ -453,9 +463,12 @@ def main() -> None:
     if "messages" not in current_conv:
         current_conv["messages"] = []
 
-    # 空對話時顯示引導文案
+    # 空對話時顯示引導文案（強調合約審閱流程）
     if not current_conv["messages"]:
-        st.info("在下方輸入問題，或先展開「為此對話上傳並灌入文件」上傳 .txt / .md / .pdf 灌入知識庫後再問答。")
+        st.info(
+            "**合約審閱**：先展開「為此對話上傳並灌入文件」上傳合約 .pdf / .txt / .md，按「灌入到向量庫」後，"
+            "在側欄點「一鍵審閱」或輸入「請審閱這份合約的風險條款」即可。"
+        )
         st.markdown("")  # 小留白
 
     # 整理給模型用的對話歷史（只保留 role + content），傳入 RAG/專家以記得上下文
@@ -481,8 +494,11 @@ def main() -> None:
             _render_chart_chunks(msg)
             if msg.get("sources"):
                 _render_sources_expander(msg["sources"])
+            _is_contract_tool = msg.get("tool_name") in ("contract_risk_agent", "contract_risk_with_law_search")
+            if _is_contract_tool and msg.get("chunks"):
+                st.caption("以下為合約風險分析，可展開檢索片段對照原文。")
             if msg.get("chunks"):
-                with st.expander("查看檢索片段"):
+                with st.expander("查看檢索片段", expanded=_is_contract_tool):
                     for c in msg["chunks"]:
                         st.markdown(f"**{c['tag']}**\n\n{c['text']}")
 
@@ -518,6 +534,10 @@ def main() -> None:
                 st.error(f"灌入失敗：{e}")
 
     question = st.chat_input("輸入你的問題…")
+    # 一鍵審閱：側欄按鈕觸發後，以預設問題當作本輪使用者輸入
+    if question is None and st.session_state.get("one_click_review_chat_id") == active_conv_id and st.session_state.get("one_click_review_question"):
+        question = st.session_state.pop("one_click_review_question", "")
+        st.session_state.pop("one_click_review_chat_id", None)
     if not question:
         return
 
@@ -567,6 +587,7 @@ def main() -> None:
             "content": answer or "(空回覆)",
             "sources": sources,
             "chunks": chunks,
+            "tool_name": tool_name,
             "chart_option": (extra or {}).get("chart_option"),
             "chart_image_base64": (extra or {}).get("chart_image_base64"),
             "chart_chunks": (extra or {}).get("chart_chunks"),
@@ -612,6 +633,7 @@ def main() -> None:
             "content": answer or "(空回覆)",
             "sources": sources,
             "chunks": chunks,
+            "tool_name": tool_name,
             "chart_option": (extra or {}).get("chart_option"),
             "chart_image_base64": (extra or {}).get("chart_image_base64"),
             "chart_chunks": (extra or {}).get("chart_chunks"),
@@ -643,8 +665,11 @@ def main() -> None:
         _render_chart_chunks(extra)
         if sources:
             _render_sources_expander(sources)
+        _contract_tool = tool_name in ("contract_risk_agent", "contract_risk_with_law_search")
+        if _contract_tool and chunks:
+            st.caption("以下為合約風險分析，可展開檢索片段對照原文。")
         if chunks:
-            with st.expander("查看檢索片段"):
+            with st.expander("查看檢索片段", expanded=_contract_tool):
                 for c in chunks:
                     st.markdown(f"**{c['tag']}**\n\n{c['text']}")
 
@@ -660,6 +685,7 @@ def main() -> None:
         "content": answer or "(空回覆)",
         "sources": sources,
         "chunks": chunks,
+        "tool_name": tool_name,
         "chart_option": (extra or {}).get("chart_option"),
         "chart_image_base64": (extra or {}).get("chart_image_base64"),
         "chart_chunks": (extra or {}).get("chart_chunks"),

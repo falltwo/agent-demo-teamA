@@ -79,6 +79,17 @@ agent_router.route_and_answer(question=目前問題, history=history_for_model)
 
 ---
 
+## 四之一、合約審閱場景建議
+
+針對 **合約／採購法遵審閱** 使用情境，建議：
+
+- **RAG_USE_HISTORY_FOR_QUERY=1**：多輪審閱時「那下一條呢？」「付款條件呢？」等短問能改寫成完整檢索問句。
+- **RAG_MULTI_QUERY=1**：交叉比對管轄法院與雙方地址、智財權與付款條件等時，輔助問句可補足脈絡。
+- **RAG_MAX_HISTORY_TURNS**：至少 6～12，讓判官與 contract_risk_agent 能正確對應「這份合約」「第三條」等指代。
+- 需使用 **contract_risk_with_law_search**（合約＋法條查詢）時，請設定 **TAVILY_API_KEY**，系統會依合約內容抽法條字號並查司法院等來源。
+
+---
+
 ## 五、小結
 
 - **記憶從哪來**：Streamlit 的 `conversations[active_conv_id]["messages"]`，每輪問答後都會 append，下一輪整段當成 history 傳下去。
