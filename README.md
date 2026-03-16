@@ -50,6 +50,18 @@ uv run streamlit run streamlit_app.py
 
 ---
 
+## 常見問題
+
+| 項目 | 說明 |
+|------|------|
+| **1️⃣ AI 準確率** | 本專案以 **Eval 題集** 驗證 **意圖路由準確率**（使用者問題 → 正確工具）與 **Tool 成功率**（無異常完成率）。執行 `uv run python eval/run_eval.py` 會產出 `routing_accuracy`、`tool_success_rate` 及延遲 P50/P95，結果寫入 `eval/runs/run_<timestamp>_metrics.json`。實際數值依題集與 API 狀態而異，可重跑 Eval 取得最新數據。 |
+| **2️⃣ 如何避免幻覺（hallucination）** | **(1) RAG  grounding**：先檢索再生成，回答以檢索片段為依據。**(2) 嚴格模式**：勾選「嚴格只根據知識庫回答」時，系統僅依檢索內容與歷史回答，不臆測。**(3) 雙 Prompt**：調查員打包脈絡 → 判官依脈絡產出，並要求引用 `[編號]`、文末列出 `(source#chunk)`。**(4) 合約＋法條流程**：產出後有 **AI 自檢** 步驟，以「回答＋來源摘要」請 LLM 驗證是否與來源一致，並附免責聲明。 |
+| **3️⃣ 法規怎麼更新** | **即時法條查詢**：透過 Tavily 查司法院／網路，取得當下檢索結果，無需手動更新。**知識庫內文件**（含自建法規檔、合約範本）：將新檔放入 `data/` 或於 Streamlit「為此對話上傳並灌入」後執行灌入；若需全面換新，可先於側欄點「清空資料庫」再重新灌入，或直接執行 `uv run rag_ingest.py` 覆寫/追加。 |
+| **4️⃣ 有沒有 evaluation dataset** | **有**。題集位於 `eval/eval_set.json`（合約／法遵主題約 20 題）、`eval/eval_set_contract.json`（合約專用）。每題含 `question` 與 `expected_tool`，用於計算意圖路由準確率與 Tool 成功率；執行方式見下方「Eval 與技術驗證」。 |
+| **5️⃣ 跟 ChatGPT 差在哪** | 本系統為 **領域代理**：綁定企業合約與自建知識庫、依意圖路由到 RAG／合約審閱／法條查詢／專家；回答可 **追溯**（檢索片段、引用、AI 自檢、免責）。ChatGPT 為通用對話，不綁定你的內部文件，無法保證僅依你的合約或法規回答，且無內建 Eval 驗證。本專案適合「第一輪合約審閱＋法條對照＋可驗證產出」的場景。 |
+
+---
+
 ## 如何試用／Demo
 
 1. 確認 `.env` 已填、側欄「嚴格只根據知識庫回答」**未勾選**（才能走合約工具）。
@@ -156,6 +168,18 @@ In the browser you can: expand “Upload and ingest documents for this conversat
 | **Observability** | Eval sets (`eval/eval_set.json`, `eval/eval_set_contract.json`), `run_eval.py` outputs routing accuracy, tool success rate, latency; Streamlit shows Eval run log and batch results. |
 
 **Stack**: Google Gemini (LLM + embedding), Pinecone, LangGraph, Streamlit; optional Tavily, Firecrawl, ECharts, Groq (Eval).
+
+---
+
+## FAQ 
+
+| Topic | Description |
+|-------|-------------|
+| **1️⃣ AI accuracy** | The project uses an **Eval set** to measure **routing accuracy** (user question → correct tool) and **tool success rate** (no-exception completion). Run `uv run python eval/run_eval.py` to get `routing_accuracy`, `tool_success_rate`, and latency P50/P95 in `eval/runs/run_<timestamp>_metrics.json`. Actual numbers depend on the set and API; re-run Eval for latest results. |
+| **2️⃣ Avoiding hallucination** | **(1) RAG grounding**: retrieve then generate; answers are grounded in retrieved chunks. **(2) Strict mode**: when “Strict: answer only from knowledge base” is checked, the system answers only from retrieved content and history. **(3) Dual prompt**: investigator packages context → judge answers from that context, with `[id]` citations and `(source#chunk)` at the end. **(4) Contract+law flow**: an **AI self-check** step verifies that the answer is consistent with sources and appends a disclaimer. |
+| **3️⃣ Updating regulations** | **Live law lookup**: Tavily queries Judicial Yuan / web for current results; no manual update. **Knowledge-base documents** (e.g. internal regulations, contract templates): add new files under `data/` or upload and ingest in Streamlit; for a full refresh, use sidebar “清空資料庫” then re-ingest, or run `uv run rag_ingest.py` to overwrite/append. |
+| **4️⃣ Evaluation dataset** | **Yes.** Eval sets: `eval/eval_set.json` (contract/compliance, ~20 items), `eval/eval_set_contract.json` (contract-only). Each item has `question` and `expected_tool` for routing and tool-success metrics; see “Eval and validation” below. |
+| **5️⃣ vs. ChatGPT** | This system is a **domain agent**: tied to your contracts and knowledge base, with intent-based routing (RAG / contract review / law lookup / experts) and **traceable** answers (chunks, citations, self-check, disclaimer). ChatGPT is general-purpose and does not bind to your internal docs or guarantee answers from your data; this project targets “first-pass contract review + law alignment + verifiable output” with Eval. |
 
 ---
 
