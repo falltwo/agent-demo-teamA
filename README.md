@@ -8,6 +8,12 @@
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit)](https://streamlit.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+### 系統流程
+
+從使用者輸入到輸出的請求流程（意圖路由 → 各工具／專家 → 回答與引用）：
+
+![系統流程](assets/flowchart.png)
+
 ---
 
 ## 快速開始
@@ -47,6 +53,12 @@ uv run streamlit run streamlit_app.py
 | **可觀測** | Eval 題集（`eval/eval_set.json`、`eval/eval_set_contract.json`）、`run_eval.py` 產出 routing 準確率、Tool 成功率、延遲；Streamlit 可檢視 Eval 運行記錄與批次結果。 |
 
 **技術棧**：Google Gemini（LLM + embedding）、Pinecone、LangGraph、Streamlit；可選 Tavily、Firecrawl、ECharts、Groq（Eval）。
+
+### 系統架構
+
+模組與資料流（前端、Agent Router、RAG／合約／法條／專家、灌入與 Eval）：
+
+![系統架構](assets/architecture-diagram.png)
 
 ---
 
@@ -129,6 +141,12 @@ uv run python eval/run_eval.py --groq
 
 This project is an entry for the **2026 Smart Innovation Awards (AI Application)**. It combines **RAG and a multi-tool agent** for contract risk analysis, judicial law lookup (e.g. Taiwan’s Judicial Yuan), knowledge-base Q&A, and Eval-based validation. The UI is a Streamlit multi-turn chat that supports uploading contracts (.txt / .md / .pdf / .docx) and one-click review or natural-language questions.
 
+### System flow
+
+Request flow from user input to output (intent routing → tools / experts → answer and citations):
+
+![System flow](assets/flowchart.png)
+
 ---
 
 ## Quick Start
@@ -168,6 +186,12 @@ In the browser you can: expand “Upload and ingest documents for this conversat
 | **Observability** | Eval sets (`eval/eval_set.json`, `eval/eval_set_contract.json`), `run_eval.py` outputs routing accuracy, tool success rate, latency; Streamlit shows Eval run log and batch results. |
 
 **Stack**: Google Gemini (LLM + embedding), Pinecone, LangGraph, Streamlit; optional Tavily, Firecrawl, ECharts, Groq (Eval).
+
+### System architecture
+
+Modules and data flow (frontend, Agent Router, RAG / contract / law / experts, ingest and Eval):
+
+![System architecture](assets/architecture-diagram.png)
 
 ---
 
