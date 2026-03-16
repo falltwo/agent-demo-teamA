@@ -78,11 +78,13 @@ uv run streamlit run streamlit_app.py
 
 ## Eval 與技術驗證
 
+預設題集為**合約／法遵主題**（合約審閱、法條查詢、知識庫列舉與 RAG 問答），與作品定位一致。
+
 ```bash
-# 通用題集
+# 預設：合約／法遵題集（eval_set.json）
 uv run python eval/run_eval.py
 
-# 合約／法律題集
+# 合約專用題集（eval_set_contract.json，題數較少）
 uv run python eval/run_eval.py --eval-set eval/eval_set_contract.json
 
 # 使用 Groq（需 GROQ_API_KEY）
@@ -104,3 +106,112 @@ uv run python eval/run_eval.py --groq
 ## 授權
 
 本專案採用 **MIT License**，詳見 [LICENSE](LICENSE)。
+
+---
+
+# English
+
+## Autonomous Contract Risk Assessment Agent System
+
+> Complete a first-pass contract review in **minutes**: automatically flag risk clauses, suggest amendments, and cite legal provisions—with optional scope-limited search (this conversation’s uploads only) for efficiency and traceability.
+
+This project is an entry for the **2026 Smart Innovation Awards (AI Application)**. It combines **RAG and a multi-tool agent** for contract risk analysis, judicial law lookup (e.g. Taiwan’s Judicial Yuan), knowledge-base Q&A, and Eval-based validation. The UI is a Streamlit multi-turn chat that supports uploading contracts (.txt / .md / .pdf / .docx) and one-click review or natural-language questions.
+
+---
+
+## Quick Start
+
+**1. Environment**
+
+- Copy `.env.example` to `.env` and set **PINECONE_API_KEY**, **PINECONE_INDEX**, and **GOOGLE_API_KEY** (required).
+- For contract + law lookup, set **TAVILY_API_KEY**; see `.env.example` for the rest.
+
+**2. Dependencies and ingest**
+
+```bash
+# Install dependencies (requires uv: https://docs.astral.sh/uv/)
+uv sync
+
+# Put contracts or documents in data/, ensure Pinecone index exists, then run ingest
+uv run rag_ingest.py
+```
+
+**3. Run**
+
+```bash
+uv run streamlit run streamlit_app.py
+```
+
+In the browser you can: expand “Upload and ingest documents for this conversation” to upload and ingest, or ask questions over already-ingested content. The sidebar **“Contract review prompts”** has “One-click review (knowledge base only)” and “One-click review (with law lookup)”; or type: “請審閱這份合約的風險條款” / “合約風險評估並查相關法條”.
+
+---
+
+## Technical highlights
+
+| Area | Description |
+|------|-------------|
+| **Positioning** | Single conversational entry point for contract review, law lookup, knowledge-base Q&A, and charts; intent-based routing to the right tool or expert. |
+| **RAG** | LangGraph (retrieve → generate), dual prompt (investigator packages context → judge assesses risk), optional multi-query retrieval, **Hybrid (vector + BM25)**, MMR / LLM rerank. |
+| **Contract + law** | **contract_risk_with_law_search**: RAG fetches contract → extract law references → Tavily for Judicial Yuan / web → integrated risk assessment and law highlights → AI self-check → disclaimer. |
+| **Observability** | Eval sets (`eval/eval_set.json`, `eval/eval_set_contract.json`), `run_eval.py` outputs routing accuracy, tool success rate, latency; Streamlit shows Eval run log and batch results. |
+
+**Stack**: Google Gemini (LLM + embedding), Pinecone, LangGraph, Streamlit; optional Tavily, Firecrawl, ECharts, Groq (Eval).
+
+---
+
+## How to try / Demo
+
+1. Ensure `.env` is set and the sidebar option “Strict: answer only from knowledge base” is **unchecked** (so contract tools are used).
+2. If you ingested data: ask “列出目前知識庫有哪些文件” to list sources.
+3. Click sidebar “One-click review (knowledge base only)” or ask “請審閱這份合約的風險條款” → view risk clauses and “View retrieved chunks”.
+4. With TAVILY_API_KEY: click “One-click review (with law lookup)” or ask “合約風險評估並查相關法條” → view risk + law highlights + disclaimer.
+
+Full steps and checklist: **[docs/Demo_操作指南.md](docs/Demo_操作指南.md)**.
+
+---
+
+## Project structure and docs
+
+| Path | Description |
+|------|-------------|
+| **streamlit_app.py** | Streamlit app (multi-chat, upload/ingest, Q&A, Eval view). |
+| **agent_router.py** | Main agent: tool routing (RAG, contract/law, experts, charts, web). |
+| **rag_graph.py** | RAG core: retrieval, Hybrid, dual prompt, generate; `retrieve_only` for experts. |
+| **rag_common.py** | Shared: chunk, embed, Pinecone/Gemini init, BM25 corpus and RRF merge. |
+| **expert_agents.py** | Expert agents: contract compliance, financial, ESG, data analysis. |
+| **eval/** | Eval sets and run_eval.py; results under eval/runs/. |
+| **data/** | Default ingest source (includes sample.txt, sample_contract_NDA.txt). |
+| **docs/** | Competition alignment, RAG memory, Demo guide, etc.; entry [docs/README.md](docs/README.md). |
+
+---
+
+## Eval and validation
+
+The default Eval set is **contract/compliance** (contract review, law lookup, list sources, RAG Q&A).
+
+```bash
+# Default: contract/compliance set (eval_set.json)
+uv run python eval/run_eval.py
+
+# Contract-only set (eval_set_contract.json)
+uv run python eval/run_eval.py --eval-set eval/eval_set_contract.json
+
+# Use Groq (requires GROQ_API_KEY)
+uv run python eval/run_eval.py --groq
+```
+
+Outputs: `eval/runs/run_<timestamp>_results.jsonl`, `run_<timestamp>_metrics.json` (routing accuracy, tool success rate, latency). In Streamlit sidebar, open “Eval batch results” and pick a run to inspect.
+
+---
+
+## Advanced settings (.env)
+
+- **Contract review**: `RAG_USE_HISTORY_FOR_QUERY=1`, `RAG_MAX_HISTORY_TURNS=12`; optional `RAG_MULTI_QUERY=1`, `RAG_USE_BM25=1` (Hybrid).
+- **Retrieval**: `RAG_INTERNAL_TOP_K`, `RAG_RERANK_TOP_N`, `RAG_MMR_LAMBDA`, `RAG_MIN_SCORE`; see `.env.example`.
+- **Eval**: `EVAL_LOG_ENABLED=1`, `EVAL_LOG_PATH`, `EVAL_RUNS_DIR`; use `--groq` on the command line for Groq, do not set `EVAL_USE_GROQ=1` in .env (or Streamlit will use Groq too).
+
+---
+
+## License
+
+**MIT License**; see [LICENSE](LICENSE).

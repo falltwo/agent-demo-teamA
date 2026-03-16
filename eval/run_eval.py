@@ -239,8 +239,8 @@ def main() -> None:
         results.append(r)
         with results_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
-        status = "✓" if r.get("success") else "✗"
-        print(f"  [{i+1}/{len(items)}] {status} {r.get('id')} → {r.get('predicted_tool')} ({r.get('latency_sec')}s)")
+        status = "OK" if r.get("success") else "FAIL"
+        print(f"  [{i+1}/{len(items)}] {status} {r.get('id')} -> {r.get('predicted_tool')} ({r.get('latency_sec')}s)")
         if delay_sec > 0 and i < len(items) - 1:
             time.sleep(delay_sec)
 

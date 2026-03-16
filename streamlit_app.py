@@ -149,6 +149,7 @@ def _answer_with_rag_and_log(
 def _render_eval_view() -> None:
     """Eval 運行記錄頁：讀取 log、篩選、表格、展開看詳情。"""
     st.subheader("Eval 運行記錄")
+    st.caption("每次在對話中問答後，若已啟用記錄，會在此列出問題、回答、使用的 Tool 與延遲，方便事後檢視與除錯。")
     if not eval_log_enabled():
         st.info("請在 .env 設定 `EVAL_LOG_ENABLED=1` 並重新執行問答，才會寫入記錄。日誌路徑：`EVAL_LOG_PATH`（預設 eval_runs.jsonl）。")
     runs = load_runs(limit=500)
@@ -189,6 +190,7 @@ def _render_eval_view() -> None:
 def _render_eval_batch_view() -> None:
     """Eval 批次結果頁：讀取 eval/runs/*.jsonl，選 run 後顯示每題問題與回答。"""
     st.subheader("Eval 批次結果")
+    st.caption("以固定題集（如 eval_set.json / eval_set_contract.json）執行 `uv run python eval/run_eval.py` 後，可在此選擇某次 Run 檢視 **Routing 準確率**、**Tool 成功率** 與 **延遲**，作為技術驗證與作品完整性佐證。")
     runs_dir = Path(os.getenv("EVAL_RUNS_DIR", "eval/runs"))
     if not runs_dir.is_dir():
         st.info(f"尚無批次結果目錄：`{runs_dir}`。請先執行 `uv run python eval/run_eval.py`（可加 `--groq`）產生結果。")
@@ -244,9 +246,15 @@ def _render_eval_batch_view() -> None:
         with c4:
             p95 = metrics.get("latency_p95_sec")
             st.metric("Latency P95", f"{p95}s" if p95 is not None else "—")
+        with st.expander("📌 指標說明"):
+            st.markdown("""
+            - **Routing 準確率**：意圖是否被正確路由到預期 Tool（有標註 expected_tool 的題目才計入）。
+            - **Tool 成功率**：整次 Run 中無 exception、成功回覆的題目比例。
+            - **Latency P95**：單次問答延遲的 95 分位（秒），可代表「多數請求」的響應時間；與 AI 輕量化、作品完整性驗證相關。
+            """)
 
     st.divider()
-    st.caption("各題結果（可展開看問題與回答）")
+    st.caption("各題結果（可展開看問題與回答；✓/✗ 表示該題是否成功，括號內為該題延遲）")
     for idx, r in enumerate(results):
         rid = r.get("id", "")
         q = (r.get("question") or "")[:60] + ("…" if len(r.get("question") or "") > 60 else "")
