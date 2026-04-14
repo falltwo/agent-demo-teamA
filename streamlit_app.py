@@ -1,8 +1,6 @@
 import base64
 import json
 import os
-import time
-from collections import Counter
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -11,19 +9,12 @@ import streamlit as st
 from dotenv import load_dotenv
 from google import genai
 from streamlit_echarts import st_echarts
-from pypdf import PdfReader
-
-from agent_router import route_and_answer
-from eval_log import is_enabled as eval_log_enabled, load_runs, log_run as eval_log_run
+from chat_service import answer_with_rag_and_log
+from eval_log import is_enabled as eval_log_enabled, load_runs
 from llm_client import get_chat_client_and_model
-from rag_common import (
-    chunk_text,
-    embed_texts,
-    get_clients_and_index,
-    stable_id,
-)
-from rag_common import append_bm25_corpus
-from sources_registry import load_registry, save_registry, list_sources, update_registry_on_ingest
+from rag_common import get_clients_and_index
+from ingest_service import ingest_uploaded_files
+from sources_registry import load_registry, save_registry, list_sources
 
 
 def _inject_custom_css() -> None:
@@ -76,80 +67,11 @@ def _cached_get_clients_and_index():
     return get_clients_and_index()
 
 
-def answer_with_rag(
-    *,
-    question: str,
-    top_k: int,
-    history: list[dict[str, Any]] | None = None,
-    strict: bool = True,
-    chat_id: str | None = None,
-    rag_scope_chat_id: str | None = None,
-    original_question: str | None = None,
-    clarification_reply: str | None = None,
-    chart_confirmation_question: str | None = None,
-    chart_confirmation_reply: str | None = None,
-) -> tuple[str, list[str], list[dict[str, Any]], str, dict[str, Any] | None]:
-    """走總管 Agent，回傳 (answer, sources, chunks, tool_name, extra)。extra 在 create_chart 時為 {"chart_option": ...}，其餘見各 tool。"""
-    answer, sources, chunks, tool_name, extra = route_and_answer(
-        question=question,
-        top_k=top_k,
-        history=history or [],
-        strict=strict,
-        chat_id=chat_id,
-        rag_scope_chat_id=rag_scope_chat_id,
-        original_question=original_question,
-        clarification_reply=clarification_reply,
-        chart_confirmation_question=chart_confirmation_question,
-        chart_confirmation_reply=chart_confirmation_reply,
-    )
-    return answer, sources, chunks, tool_name, extra
-
-
-def _answer_with_rag_and_log(
-    *,
-    question: str,
-    top_k: int,
-    history: list[dict[str, Any]] | None = None,
-    strict: bool = True,
-    chat_id: str | None = None,
-    rag_scope_chat_id: str | None = None,
-    original_question: str | None = None,
-    clarification_reply: str | None = None,
-    chart_confirmation_question: str | None = None,
-    chart_confirmation_reply: str | None = None,
-) -> tuple[str, list[str], list[dict[str, Any]], str, dict[str, Any] | None]:
-    """呼叫 answer_with_rag 並計時；若啟用 Eval 記錄則寫入一筆 log。"""
-    t0 = time.perf_counter()
-    answer, sources, chunks, tool_name, extra = answer_with_rag(
-        question=question,
-        top_k=top_k,
-        history=history or [],
-        strict=strict,
-        chat_id=chat_id,
-        rag_scope_chat_id=rag_scope_chat_id,
-        original_question=original_question,
-        clarification_reply=clarification_reply,
-        chart_confirmation_question=chart_confirmation_question,
-        chart_confirmation_reply=chart_confirmation_reply,
-    )
-    latency = time.perf_counter() - t0
-    if eval_log_enabled():
-        eval_log_run(
-            question=question,
-            answer=answer or "",
-            tool_name=tool_name,
-            latency_sec=latency,
-            top_k=top_k,
-            source_count=len(sources),
-            chat_id=chat_id,
-        )
-    return answer, sources, chunks, tool_name, extra
-
-
 def _render_eval_view() -> None:
     """Eval 運行記錄頁：讀取 log、篩選、表格、展開看詳情。"""
+    st.markdown('<p class="eval-dashboard-head">線上驗證</p>', unsafe_allow_html=True)
     st.subheader("Eval 運行記錄")
-    st.caption("每次在對話中問答後，若已啟用記錄，會在此列出問題、回答、使用的 Tool 與延遲，方便事後檢視與除錯。")
+    st.caption("啟用後，每次問答會記錄 Tool、延遲與內容，供檢視與除錯。")
     if not eval_log_enabled():
         st.info("請在 .env 設定 `EVAL_LOG_ENABLED=1` 並重新執行問答，才會寫入記錄。日誌路徑：`EVAL_LOG_PATH`（預設 eval_runs.jsonl）。")
     runs = load_runs(limit=500)
@@ -189,8 +111,9 @@ def _render_eval_view() -> None:
 
 def _render_eval_batch_view() -> None:
     """Eval 批次結果頁：讀取 eval/runs/*.jsonl，選 run 後顯示每題問題與回答。"""
+    st.markdown('<p class="eval-dashboard-head">批次評測</p>', unsafe_allow_html=True)
     st.subheader("Eval 批次結果")
-    st.caption("以固定題集（如 eval_set.json / eval_set_contract.json）執行 `uv run python eval/run_eval.py` 後，可在此選擇某次 Run 檢視 **Routing 準確率**、**Tool 成功率** 與 **延遲**，作為技術驗證與作品完整性佐證。")
+    st.caption("以題集執行 `uv run python eval/run_eval.py` 後，在此選 Run 檢視 Routing／Tool／延遲指標與逐題結果。")
     runs_dir = Path(os.getenv("EVAL_RUNS_DIR", "eval/runs"))
     if not runs_dir.is_dir():
         st.info(f"尚無批次結果目錄：`{runs_dir}`。請先執行 `uv run python eval/run_eval.py`（可加 `--groq`）產生結果。")
@@ -232,7 +155,7 @@ def _render_eval_batch_view() -> None:
                 pass
 
     if metrics:
-        st.caption("核心指標")
+        st.markdown('<p class="eval-dashboard-head">核心指標</p>', unsafe_allow_html=True)
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.metric("總題數", metrics.get("total", 0))
@@ -280,113 +203,10 @@ def _render_eval_batch_view() -> None:
                 st.caption(f"錯誤：{str(r.get('error'))[:500]}")
 
 
-def ingest_uploaded_files(
-    *,
-    embed_client: genai.Client,
-    index: Any,
-    index_dim: int,
-    embed_model: str,
-    uploaded_files: list[Any],
-    chat_id: str | None = None,
-) -> int:
-    # 支援 .txt / .md / .pdf / .docx
-    all_sources: list[str] = []
-    all_texts: list[str] = []
-    all_chunk_indexes: list[int] = []
-    all_ids: list[str] = []
-
-    for uf in uploaded_files:
-        name = getattr(uf, "name", "uploaded")
-        lower_name = name.lower()
-        if not (lower_name.endswith(".txt") or lower_name.endswith(".md") or lower_name.endswith(".pdf") or lower_name.endswith(".docx")):
-            continue
-
-        raw = uf.getvalue()
-        if lower_name.endswith(".pdf"):
-            try:
-                reader = PdfReader(BytesIO(raw))
-                pages_text: list[str] = []
-                for page in reader.pages:
-                    t = page.extract_text() or ""
-                    if t:
-                        pages_text.append(t)
-                text = "\n\n".join(pages_text)
-            except Exception:
-                text = ""
-        elif lower_name.endswith(".docx"):
-            try:
-                from docx import Document
-                doc = Document(BytesIO(raw))
-                parts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-                text = "\n\n".join(parts)
-            except Exception:
-                text = ""
-        else:
-            text = raw.decode("utf-8", errors="ignore")
-
-        if not text.strip():
-            continue
-        parts = chunk_text(text)
-        if chat_id:
-            source = f"uploaded/{chat_id}/{name}"
-        else:
-            source = f"uploaded/{name}"
-
-        for i, part in enumerate(parts):
-            all_sources.append(source)
-            all_texts.append(part)
-            all_chunk_indexes.append(i)
-            all_ids.append(stable_id(source, i, part))
-
-    if not all_texts:
-        return 0
-
-    vectors = embed_texts(
-        embed_client,
-        all_texts,
-        model=embed_model,
-        output_dimensionality=index_dim,
-    )
-
-    batch_size = 100
-    for i in range(0, len(all_texts), batch_size):
-        to_upsert = []
-        for j in range(i, min(len(all_texts), i + batch_size)):
-            metadata = {
-                "text": all_texts[j],
-                "source": all_sources[j],
-                "chunk_index": all_chunk_indexes[j],
-            }
-            if chat_id is not None:
-                metadata["chat_id"] = chat_id
-            to_upsert.append((all_ids[j], vectors[j], metadata))
-        index.upsert(vectors=to_upsert)
-
-    source_counts = Counter(all_sources)
-    update_registry_on_ingest(
-        [
-            {"source": s, "chunk_count": c, "chat_id": chat_id}
-            for s, c in source_counts.items()
-        ]
-    )
-    # BM25 語料：上傳灌入時追加（含 chat_id）
-    append_bm25_corpus([
-        {
-            "id": all_ids[j],
-            "text": all_texts[j],
-            "source": all_sources[j],
-            "chunk_index": all_chunk_indexes[j],
-            "chat_id": chat_id,
-        }
-        for j in range(len(all_texts))
-    ])
-    return len(all_texts)
-
-
 def main() -> None:
     st.set_page_config(
-        page_title="智慧問答合約／採購法遵審閱助理",
-        page_icon="💬",
+        page_title="合約／法遵審閱助理｜RAG 多工具 Agent",
+        page_icon="⚖️",
         layout="centered",
         initial_sidebar_state="expanded",
     )
@@ -414,7 +234,13 @@ def main() -> None:
     current_conv = conversations[active_conv_id]
 
     with st.sidebar:
+        st.markdown(
+            '<p class="sidebar-brand">合約／法遵助理</p>'
+            '<p class="sidebar-section-title">導覽</p>',
+            unsafe_allow_html=True,
+        )
         view = st.radio("畫面", ["對話", "Eval 運行記錄", "Eval 批次結果"], key="nav_view")
+        st.markdown('<p class="sidebar-section-title">連線與檢索</p>', unsafe_allow_html=True)
         st.subheader("設定")
         st.caption(f"Pinecone index：`{index_name}`（dim={index_dim}）")
         st.caption(f"Chat model：`{llm_model}`")
@@ -441,6 +267,7 @@ def main() -> None:
                 st.rerun()
 
         st.divider()
+        st.markdown('<p class="sidebar-section-title">對話與維護</p>', unsafe_allow_html=True)
         st.subheader("對話")
         conv_ids = list(conversations.keys())
         current_index = conv_ids.index(active_conv_id)
@@ -472,6 +299,13 @@ def main() -> None:
             st.rerun()
 
         st.divider()
+        st.markdown(
+            '<div class="sidebar-danger-block">'
+            '<p class="sidebar-danger-label">危險操作</p>'
+            '<p class="sidebar-danger-hint">將清空向量庫與來源註冊表，無法復原。</p>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
         if st.button("清空資料庫", type="secondary", use_container_width=True, key="btn_clear_db"):
             try:
                 index.delete(delete_all=True)
@@ -485,13 +319,16 @@ def main() -> None:
     st.title("合約／法遵審閱助理")
     if view == "對話":
         st.markdown(
-            '<p class="app-tagline">RAG · 合約風險 · 法條查詢 · 知識庫問答 · 多輪對話</p>',
+            '<div class="app-hero-pills" aria-label="功能摘要">'
+            "<span>RAG</span><span>合約審閱</span><span>法條</span><span>圖表</span><span>多輪</span>"
+            "</div>"
+            '<p class="app-tagline">上傳灌入後提問，或由側欄一鍵審閱；支援檢索片段與參考連結對照。</p>',
             unsafe_allow_html=True,
         )
     elif view == "Eval 運行記錄":
-        st.caption("檢視執行記錄")
+        st.caption("線上單次問答之執行紀錄")
     elif view == "Eval 批次結果":
-        st.caption("檢視批次結果")
+        st.caption("批次題集之指標與逐題結果")
 
     if view == "Eval 運行記錄":
         _render_eval_view()
@@ -506,10 +343,12 @@ def main() -> None:
     # 空對話時顯示引導文案（強調合約審閱流程）
     if not current_conv["messages"]:
         st.info(
-            "**合約審閱**：先展開「為此對話上傳並灌入文件」上傳合約 .pdf / .docx / .txt / .md，按「灌入到向量庫」後，"
-            "在側欄點「一鍵審閱」或輸入「請審閱這份合約的風險條款」即可。"
+            "**開始方式（三步）**  \n"
+            "1. 展開下方「為此對話上傳並灌入文件」，上傳 .pdf／.docx／.txt／.md  \n"
+            "2. 按「灌入到向量庫」  \n"
+            "3. 於側欄使用「一鍵審閱」或在下方輸入問題（例：審閱合約風險條款）"
         )
-        st.markdown("")  # 小留白
+        st.markdown("")
 
     # 整理給模型用的對話歷史（只保留 role + content），傳入 RAG/專家以記得上下文
     history_for_model: list[dict[str, Any]] = []
@@ -594,7 +433,7 @@ def main() -> None:
     if pending_chart is not None:
         with st.chat_message("assistant"):
             with st.spinner("正在生成圖表…"):
-                answer, sources, chunks, tool_name, extra = _answer_with_rag_and_log(
+                answer, sources, chunks, tool_name, extra = answer_with_rag_and_log(
                     question=question,
                     top_k=top_k,
                     history=history_for_model,
@@ -641,7 +480,7 @@ def main() -> None:
     if pending is not None:
         with st.chat_message("assistant"):
             with st.spinner("依您的選擇執行中…"):
-                answer, sources, chunks, tool_name, extra = _answer_with_rag_and_log(
+                answer, sources, chunks, tool_name, extra = answer_with_rag_and_log(
                     question=question,
                     top_k=top_k,
                     history=history_for_model,
@@ -685,7 +524,7 @@ def main() -> None:
 
     with st.chat_message("assistant"):
         with st.spinner("檢索並生成答案中…"):
-            answer, sources, chunks, tool_name, extra = _answer_with_rag_and_log(
+            answer, sources, chunks, tool_name, extra = answer_with_rag_and_log(
                 question=question,
                 top_k=top_k,
                 history=history_for_model,

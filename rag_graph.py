@@ -7,7 +7,9 @@ import os
 import re
 import time
 from difflib import SequenceMatcher
-from typing import Any, List, TypedDict
+from typing import Any, List, TypedDict, cast
+
+from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ class _RAGStateRequired(TypedDict):
 class RAGState(_RAGStateRequired, total=False):
     """RAG 圖狀態。error 為選填，retrieve 失敗時寫入，generate 會直接回覆錯誤不呼叫 LLM。"""
     error: str
+    chat_id: str  # 選填：檢索僅限該對話上傳的 chunks；亦作為 thread_id
 
 
 # 生成回答時只取最近 N 輪對話，避免過長歷史吃滿 context 並維持「記得上下文」效果
@@ -434,7 +437,9 @@ def _build_graph():
             min_score = float(min_score_env) if min_score_env is not None else 0.0
             if did_hybrid:
                 min_score = 0.0  # RRF 分數非 cosine，不依門檻過濾
-            filtered_matches = [m for m in raw_matches if m.get("score") is None or m.get("score") >= min_score]
+            filtered_matches = [
+                m for m in raw_matches if (s := m.get("score")) is None or s >= min_score
+            ]
 
             if os.getenv("RAG_DEDUP_ENABLED", "").strip().lower() in ("1", "true", "yes"):
                 filtered_matches = _dedup_matches(filtered_matches)
@@ -642,8 +647,8 @@ def run_rag(
     }
     if chat_id:
         state["chat_id"] = chat_id
-    config = {"configurable": {"thread_id": chat_id or "default"}}
-    result_raw = graph.invoke(state, config=config)
+    config: RunnableConfig = {"configurable": {"thread_id": chat_id or "default"}}
+    result_raw = graph.invoke(cast(RAGState, state), config=config)
     result: RAGState = {
         "question": result_raw.get("question", question),
         "top_k": result_raw.get("top_k", state["top_k"]),

@@ -1,0 +1,122 @@
+/**
+ * 設計系統 — Web 用戶端：冷靜深色系（權威、穩定、低飽和）
+ * - 深灰／藍灰底、單一冰藍強調；4/8px 網格
+ * - 語意色與元件皆用 CSS 變數，避免散落魔術數字
+ */
+
+:root {
+  /* --- 色票（語意，深色系）--- */
+  --color-bg-app: #0f1218;
+  --color-bg-surface: #171b24;
+  --color-bg-elevated: #1e232e;
+  --color-bg-muted: #262c38;
+  --color-border-subtle: #323a48;
+  --color-border-strong: #465061;
+
+  --color-text-primary: #e8eaef;
+  --color-text-secondary: #a8b0bf;
+  --color-text-muted: #768090;
+
+  /* 冰藍強調（低飽和） */
+  --color-accent: #7eb8e0;
+  --color-accent-hover: #9dc9eb;
+  --color-accent-muted: rgba(126, 184, 224, 0.14);
+  --color-accent-on-accent: #0d1118;
+
+  --color-success: #5d9e7a;
+  --color-success-muted: rgba(93, 158, 122, 0.15);
+  --color-warning: #c9a227;
+  --color-warning-muted: rgba(201, 162, 39, 0.12);
+  --color-danger: #e07066;
+  --color-danger-muted: rgba(224, 112, 102, 0.14);
+
+  /* --- 字體 --- */
+  --font-display: "Source Serif 4", "Noto Serif TC", Georgia, serif;
+  --font-body: "DM Sans", "Noto Sans TC", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+
+  /* --- 字階：標題 > 內文 > 輔助 --- */
+  --text-display-size: 1.625rem;
+  --text-display-leading: 1.25;
+  --text-title-size: 1.125rem;
+  --text-title-leading: 1.35;
+  --text-body-size: 0.9375rem;
+  --text-body-leading: 1.62;
+  --text-body-sm-size: 0.8125rem;
+  --text-body-sm-leading: 1.52;
+  --text-caption-size: 0.75rem;
+  --text-caption-leading: 1.45;
+  --text-code-size: 0.8125rem;
+
+  /* --- 圓角（克制）--- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* --- 陰影（深色底上更依賴邊界與微陰影）--- */
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-md: 0 4px 14px rgb(0 0 0 / 0.45);
+  --shadow-popover: 0 16px 40px rgb(0 0 0 / 0.55);
+
+  /* --- 4/8px 網格 --- */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-2-5: 12px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 40px;
+  --space-7: 48px;
+
+  /* --- 版面 --- */
+  --chat-max-width: 800px;
+  --sidebar-width: 260px;
+  --prose-measure: 62ch;
+  --page-copy-max-width: min(46em, 100%);
+  --focus-ring: 2px solid var(--color-accent);
+  --focus-ring-offset: 2px;
+
+  --color-link: var(--color-accent);
+  --color-link-hover: var(--color-accent-hover);
+}
+
+body {
+  margin: 0;
+}
+
+.ds-a {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--color-bg-app);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+}
+
+.ds-a h1,
+.ds-a .font-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.ds-a a:not([class]) {
+  color: var(--color-link);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.ds-a a:not([class]):hover {
+  color: var(--color-link-hover);
+}
+
+.ds-a a:not([class]):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: var(--radius-sm);
+}

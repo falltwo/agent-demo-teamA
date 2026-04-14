@@ -1,5 +1,5 @@
-# RAG 智慧問答 主題：主色 #1E3A8A、按鈕 #3B82F6、背景 #F8FAFC
-# 成功 #22C55E、警告 #EF4444
+# 合約／法遵助理 — 與 assets/custom.css :root 色票一致
+# 主色 brand #1E3A8A（標題／側欄強調）、按鈕 primary #3B82F6、背景 #F8FAFC
 
 [theme]
 base = "light"

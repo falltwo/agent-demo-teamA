@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python deps
+        run: uv sync --extra dev
+      - name: Pytest
+        run: uv run pytest
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install Python (OpenAPI 匯出可選)
+        run: uv sync --extra dev
+      - name: Install web deps
+        run: npm ci
+        working-directory: web
+      - name: OpenAPI 型別與 TypeScript 檢查
+        run: npm run contract:check
+        working-directory: web
+      - name: Vite build
+        run: npm run build
+        working-directory: web
+
+  playwright:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install Python deps
+        run: uv sync --extra dev
+      - name: Install web deps
+        run: npm ci
+        working-directory: web
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+        working-directory: web
+      - name: E2E（health + chat mock）
+        run: npm run test:e2e
+        working-directory: web
