@@ -164,6 +164,14 @@ async function loadBatchDetail(runId: string) {
   }
 }
 
+async function refreshAll(): Promise<void> {
+  await Promise.all([
+    loadConfig(),
+    loadOnlineRuns(),
+    loadBatchRuns(),
+  ]);
+}
+
 watch(
   selectedRunId,
   (runId) => {
@@ -171,11 +179,7 @@ watch(
   },
 );
 
-void Promise.all([
-  loadConfig(),
-  loadOnlineRuns(),
-  loadBatchRuns(),
-]);
+void refreshAll();
 </script>
 
 <template>
@@ -206,13 +210,7 @@ void Promise.all([
             type="button"
             class="ds-btn ds-btn--secondary"
             :disabled="loadingConfig || loadingRuns || loadingBatch"
-            @click="
-              void Promise.all([
-                loadConfig(),
-                loadOnlineRuns(),
-                loadBatchRuns(),
-              ])
-            "
+            @click="void refreshAll()"
           >
             重新整理全部
           </button>
@@ -511,4 +509,3 @@ void Promise.all([
   }
 }
 </style>
-
