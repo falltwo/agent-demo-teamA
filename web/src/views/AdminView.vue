@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
 
 import { ApiError } from "@/api/client";
 import {
@@ -81,7 +80,8 @@ const detailError = ref<unknown>(null);
 
 const RESTARTABLE_SERVICES: readonly string[] = [
   "contract-agent-api.service",
-  "contract-agent-web.service",
+  "contract-agent-web-frontend.service",
+  "contract-agent-web-admin.service",
   "ollama.service",
 ];
 
@@ -357,14 +357,7 @@ const previewResultsText = computed(() => {
   return rows.map((row) => toPrettyJson(row)).join("\n\n");
 });
 
-function isServiceEnabled(row: AdminServiceStatus | undefined): boolean {
-  if (!row || row.error) {
-    return false;
-  }
-  return row.unit_file_state === "enabled";
-}
-
-const powerOn = computed<boolean | null>(() => {
+const healthOk = computed<boolean | null>(() => {
   if (health.value) {
     return String(health.value.status).toLowerCase() === "ok";
   }
@@ -374,52 +367,21 @@ const powerOn = computed<boolean | null>(() => {
   return null;
 });
 
-const powerStatusLabel = computed(() => {
-  if (powerOn.value == null) {
+const healthStatusLabel = computed(() => {
+  if (healthOk.value == null) {
     return "檢查中";
   }
-  return powerOn.value ? "已開機" : "未開機 / 異常";
+  return healthOk.value ? "正常" : "異常";
 });
 
-const powerStatusHint = computed(() => {
+const healthStatusHint = computed(() => {
   if (health.value) {
-    return `/health=${health.value.status}`;
+    return `health=${health.value.status}`;
   }
   if (healthError.value) {
     return "無法讀取 /health，請確認 API 服務狀態";
   }
   return "尚未取得健康檢查資料";
-});
-
-const sshRow = computed<AdminServiceStatus | undefined>(() =>
-  serviceRows.value.find((x) => x.name === "ssh.service"),
-);
-
-const sshEnabled = computed<boolean | null>(() => {
-  if (sshRow.value) {
-    return isServiceEnabled(sshRow.value);
-  }
-  if (servicesError.value) {
-    return false;
-  }
-  return null;
-});
-
-const sshStatusLabel = computed(() => {
-  if (sshEnabled.value == null) {
-    return "檢查中";
-  }
-  return sshEnabled.value ? "已啟用" : "未啟用";
-});
-
-const sshStatusHint = computed(() => {
-  if (!sshRow.value) {
-    return "尚未取得 SSH 服務資訊";
-  }
-  if (sshRow.value.error) {
-    return `SSH 服務查詢失敗：${sshRow.value.error}`;
-  }
-  return `active=${sshRow.value.active_state}, sub=${sshRow.value.sub_state}, unit=${sshRow.value.unit_file_state}`;
 });
 
 function statusLightClass(ok: boolean | null): string {
@@ -464,9 +426,6 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
           >
             {{ restarting && !restartTarget ? "重啟中..." : "重啟 API + 前端" }}
           </button>
-          <RouterLink to="/chat" class="ds-btn ds-btn--secondary">
-            前往對話
-          </RouterLink>
         </div>
       </div>
       <p v-if="restarting" class="hint">重啟目標：{{ restartTarget || "預設服務組" }}</p>
@@ -481,7 +440,11 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
       <div class="stat-grid">
         <div class="stat-item">
           <span class="k">狀態</span>
-          <strong class="v">{{ health?.status || "-" }}</strong>
+          <strong class="v status-with-light">
+            <span class="status-light" :class="statusLightClass(healthOk)" />
+            <span>{{ healthStatusLabel }}</span>
+          </strong>
+          <p class="hint">{{ healthStatusHint }}</p>
         </div>
         <div class="stat-item">
           <span class="k">服務</span>
@@ -490,22 +453,6 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
         <div class="stat-item">
           <span class="k">版本</span>
           <strong class="v">{{ health?.version || "-" }}</strong>
-        </div>
-        <div class="stat-item">
-          <span class="k">電源狀態（是否開機）</span>
-          <strong class="v status-with-light">
-            <span class="status-light" :class="statusLightClass(powerOn)" />
-            <span>{{ powerStatusLabel }}</span>
-          </strong>
-          <p class="hint">{{ powerStatusHint }}</p>
-        </div>
-        <div class="stat-item">
-          <span class="k">SSH 是否啟用</span>
-          <strong class="v status-with-light">
-            <span class="status-light" :class="statusLightClass(sshEnabled)" />
-            <span>{{ sshStatusLabel }}</span>
-          </strong>
-          <p class="hint">{{ sshStatusHint }}</p>
         </div>
       </div>
     </section>

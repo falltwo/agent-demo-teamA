@@ -174,11 +174,8 @@ npm run dev
 
 啟動後可用：
 
-- 對話頁：`http://localhost:5173/chat`
-- 上傳頁：`http://localhost:5173/upload`
-- 來源清單：`http://localhost:5173/sources`
-- 管理後台：`http://localhost:5173/admin`
-- Eval 頁：`http://localhost:5173/eval`
+- 前台站：`http://localhost:5173/chat`、`/upload`、`/sources`
+- 後台站：`http://localhost:5173/admin`、`/eval`
 
 ## 部署方式
 
@@ -196,7 +193,8 @@ bash scripts/deploy_contract_agent.sh
 | 服務 | 預設埠 | 說明 |
 |------|--------|------|
 | `contract-agent-api.service` | `8000` | FastAPI 後端 |
-| `contract-agent-web.service` | `4173` | Vue build 後的預覽服務 |
+| `contract-agent-web-frontend.service` | `4173` | 前台網站（chat / upload / sources） |
+| `contract-agent-web-admin.service` | `4174` | 後台網站（admin / eval） |
 
 部署時請留意：
 

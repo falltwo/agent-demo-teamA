@@ -15,20 +15,23 @@ from backend.schemas.admin import (
 
 MONITORED_SERVICES = (
     "contract-agent-api.service",
-    "contract-agent-web.service",
+    "contract-agent-web-frontend.service",
+    "contract-agent-web-admin.service",
     "ollama.service",
     "ssh.service",
 )
 
 RESTARTABLE_SERVICES = (
     "contract-agent-api.service",
-    "contract-agent-web.service",
+    "contract-agent-web-frontend.service",
+    "contract-agent-web-admin.service",
     "ollama.service",
 )
 
 DEFAULT_RESTART_SERVICES = (
     "contract-agent-api.service",
-    "contract-agent-web.service",
+    "contract-agent-web-frontend.service",
+    "contract-agent-web-admin.service",
 )
 
 

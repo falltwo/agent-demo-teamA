@@ -2,8 +2,9 @@
 import { RouterLink } from "vue-router";
 
 import ConversationListPanel from "@/components/layout/ConversationListPanel.vue";
+import { IS_ADMIN_TARGET, IS_FRONTEND_TARGET } from "@/config/runtime";
 
-const nav = [
+const frontNav = [
   {
     to: "/chat",
     title: "對話",
@@ -19,12 +20,26 @@ const nav = [
     title: "知識來源",
     desc: "查看已建立索引的檔案與切片數量。",
   },
+] as const;
+
+const adminNav = [
   {
     to: "/admin",
     title: "管理後台",
     desc: "查看服務狀態、模型、上傳工具與 EVAL。",
   },
+  {
+    to: "/eval",
+    title: "EVAL",
+    desc: "查看線上與批次評估紀錄。",
+  },
 ] as const;
+
+const nav = IS_ADMIN_TARGET
+  ? adminNav
+  : IS_FRONTEND_TARGET
+    ? frontNav
+    : [...frontNav, ...adminNav];
 </script>
 
 <template>
@@ -35,7 +50,7 @@ const nav = [
           合約法遵助理
         </p>
       </div>
-      <ConversationListPanel />
+      <ConversationListPanel v-if="!IS_ADMIN_TARGET" />
       <p class="nav-section-label">
         功能選單
       </p>

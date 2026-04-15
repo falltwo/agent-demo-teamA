@@ -5,9 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BRANCH="${BRANCH:-main}"
 API_SERVICE="${API_SERVICE:-contract-agent-api.service}"
-WEB_SERVICE="${WEB_SERVICE:-contract-agent-web.service}"
 API_PORT="${API_PORT:-8000}"
-WEB_PORT="${WEB_PORT:-4173}"
+WEB_FRONT_SERVICE="${WEB_FRONT_SERVICE:-contract-agent-web-frontend.service}"
+WEB_ADMIN_SERVICE="${WEB_ADMIN_SERVICE:-contract-agent-web-admin.service}"
+WEB_FRONT_PORT="${WEB_FRONT_PORT:-4173}"
+WEB_ADMIN_PORT="${WEB_ADMIN_PORT:-4174}"
 UV_ENV_FILE="${UV_ENV_FILE:-$HOME/.local/bin/env}"
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
 
@@ -45,7 +47,7 @@ npm run build
 
 cd "${PROJECT_DIR}"
 sudo -n systemctl daemon-reload
-sudo -n systemctl restart "${API_SERVICE}" "${WEB_SERVICE}"
+sudo -n systemctl restart "${API_SERVICE}" "${WEB_FRONT_SERVICE}" "${WEB_ADMIN_SERVICE}"
 
 health_url="http://127.0.0.1:${API_PORT}/health"
 deadline=$((SECONDS + HEALTH_TIMEOUT_SEC))
@@ -64,9 +66,11 @@ if command -v tailscale >/dev/null 2>&1; then
 fi
 
 echo "Deployment complete."
-echo "Frontend (LAN):       http://${lan_ip}:${WEB_PORT}"
+echo "Frontend (LAN):       http://${lan_ip}:${WEB_FRONT_PORT}"
+echo "Admin (LAN):          http://${lan_ip}:${WEB_ADMIN_PORT}"
 echo "API health (LAN):     http://${lan_ip}:${API_PORT}/health"
 if [[ -n "${tailscale_ip}" ]]; then
-  echo "Frontend (Tailscale): http://${tailscale_ip}:${WEB_PORT}"
+  echo "Frontend (Tailscale): http://${tailscale_ip}:${WEB_FRONT_PORT}"
+  echo "Admin (Tailscale):    http://${tailscale_ip}:${WEB_ADMIN_PORT}"
   echo "API health (Tail):    http://${tailscale_ip}:${API_PORT}/health"
 fi
