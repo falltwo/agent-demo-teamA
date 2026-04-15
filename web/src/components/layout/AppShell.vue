@@ -19,6 +19,11 @@ const nav = [
     title: "已加入的檔案",
     desc: "查看已加入的檔案與對話篩選",
   },
+  {
+    to: "/eval",
+    title: "EVAL",
+    desc: "檢視線上紀錄與批次評估結果",
+  },
 ] as const;
 </script>
 

@@ -18,6 +18,11 @@ export type SourceEntry = Schemas["SourceEntry"];
 export type IngestUploadResponse = Schemas["IngestUploadResponse"];
 export type SourcesListResponse = Schemas["SourcesListResponse"];
 export type HealthResponse = Schemas["HealthResponse"];
+export type EvalConfigResponse = Schemas["EvalConfigResponse"];
+export type EvalRunEntry = Schemas["EvalRunEntry"];
+export type EvalRunsResponse = Schemas["EvalRunsResponse"];
+export type EvalBatchListResponse = Schemas["EvalBatchListResponse"];
+export type EvalBatchDetailResponse = Schemas["EvalBatchDetailResponse"];
 
 /** 後端 ErrorResponse；例外處理器 JSON 未納入 OpenAPI components，維持手寫 */
 export interface ErrorDetail {

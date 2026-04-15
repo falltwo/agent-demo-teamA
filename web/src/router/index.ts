@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import ChatView from "../views/ChatView.vue";
+import EvalView from "../views/EvalView.vue";
 import SourcesView from "../views/SourcesView.vue";
 import UploadView from "../views/UploadView.vue";
 
@@ -22,6 +23,11 @@ const router = createRouter({
       path: "/sources",
       name: "sources",
       component: SourcesView,
+    },
+    {
+      path: "/eval",
+      name: "eval",
+      component: EvalView,
     },
   ],
 });
