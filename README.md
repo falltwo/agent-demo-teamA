@@ -46,6 +46,22 @@ uv run streamlit run streamlit_app.py
 
 ---
 
+## DGX 內部部署
+
+若要將服務常駐在 DGX，建議改用 `FastAPI + Vue`：
+
+```bash
+bash scripts/install_dgx_services.sh
+bash scripts/deploy_contract_agent.sh
+```
+
+- 後端 service：`contract-agent-api.service`（預設 `:8000`）
+- 前端 service：`contract-agent-web.service`（預設 `:4173`）
+- Vue production 會優先讀 `VITE_API_BASE_URL`，未設定時自動使用「目前瀏覽器主機 + `:8000`」
+- 若要讓區網與 Tailscale IP 都可跨埠存取，請在 `.env` 設定 `API_CORS_ORIGIN_REGEX`
+
+---
+
 ## 技術亮點
 
 | 面向 | 說明 |

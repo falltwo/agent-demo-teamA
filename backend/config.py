@@ -27,6 +27,7 @@ class Settings(BaseSettings):
         default="http://localhost:5173,http://127.0.0.1:5173",
         validation_alias="API_CORS_ORIGINS",
     )
+    api_cors_origin_regex: str | None = Field(default=None, validation_alias="API_CORS_ORIGIN_REGEX")
 
     def cors_origin_list(self) -> list[str]:
         raw = (self.api_cors_origins or "").strip()

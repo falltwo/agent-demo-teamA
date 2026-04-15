@@ -75,8 +75,26 @@ function toApiError(error: AxiosError): ApiError {
   return new ApiError({ code: "UNKNOWN_ERROR", message: msg, details: data }, status);
 }
 
+function resolveApiBaseUrl(): string {
+  const explicit = (import.meta.env.VITE_API_BASE_URL || "").trim();
+  if (explicit) {
+    return explicit.replace(/\/+$/, "");
+  }
+
+  if (import.meta.env.DEV) {
+    return "";
+  }
+
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const apiPort = (import.meta.env.VITE_API_PORT || "8000").trim() || "8000";
+  return `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
+}
+
 export const apiClient = axios.create({
-  baseURL: "",
+  baseURL: resolveApiBaseUrl(),
 });
 
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {

@@ -37,6 +37,12 @@ uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 
 `API_HOST`／`API_PORT` 僅供設定讀取；實際 bind 以 uvicorn 為準。
 
+若要做 DGX 常駐部署，repo 已提供：
+
+- `scripts/install_dgx_services.sh`
+- `scripts/deploy_contract_agent.sh`
+- `deploy/systemd/*.service.template`
+
 ## 串流（現況與建議）
 
 目前 **`route_and_answer`／LangGraph 皆為「整段完成後回傳」**，與 Streamlit 相同；尚未實作 token 串流。
@@ -174,3 +180,4 @@ const { data } = await axios.post(
 
 - 預設允許：`http://localhost:5173`、`http://127.0.0.1:5173`
 - 覆寫：環境變數 `API_CORS_ORIGINS`（逗號分隔，無空白或 trim 後使用）
+- 若需同時容納區網 IP 與 Tailscale IP，可改設 `API_CORS_ORIGIN_REGEX`

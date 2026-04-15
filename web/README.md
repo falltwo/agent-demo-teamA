@@ -29,18 +29,13 @@ npm run dev
 
 ## 環境變數（`VITE_*`）
 
-目前程式碼**未**讀取自訂 `VITE_*` 變數；僅使用 Vite 內建：
+目前前端支援：
 
-- `import.meta.env.BASE_URL` — 給 Vue Router 的 `createWebHistory` 使用。
+- `VITE_API_BASE_URL`：若設定，production 直接使用這個 API base
+- `VITE_API_PORT`：若未設定 `VITE_API_BASE_URL`，production 會改用「目前瀏覽器主機 + 此 port」（預設 `8000`）
+- `import.meta.env.BASE_URL`：給 Vue Router 的 `createWebHistory` 使用
 
-若日後需要（例如後端網址不經 proxy），可於 `web/.env` 新增：
-
-```env
-# 範例（目前不必設定）
-# VITE_API_BASE_URL=
-```
-
-並在程式中以 `import.meta.env.VITE_API_BASE_URL` 讀取；**未變更前請維持 `apiClient` 的 `baseURL: ""`**。
+DGX 常駐部署時，通常不必額外設定 `VITE_API_BASE_URL`；前端會自動用目前網址的 host，改連同主機的 `:8000`。
 
 ## 設計與 API
 
@@ -89,6 +84,20 @@ npm run build
 ```
 
 產出於 `web/dist/`。
+
+## DGX 常駐部署
+
+DGX 上建議不要使用 `npm run dev`，而是：
+
+```bash
+cd web
+npm run build
+npm run preview -- --host 0.0.0.0 --port 4173
+```
+
+- 使用者入口：`http://<dgx-ip>:4173`
+- 前端會自動呼叫 `http://<dgx-ip>:8000`
+- 後端需同步允許該來源，建議在專案根 `.env` 設 `API_CORS_ORIGIN_REGEX`
 
 ## MVP 驗收自測（建議）
 

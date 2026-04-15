@@ -1,0 +1,20 @@
+[Unit]
+Description=Contract Agent FastAPI Service
+After=network-online.target ollama.service
+Wants=network-online.target
+Requires=ollama.service
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+WorkingDirectory=__PROJECT_DIR__
+Environment=HOME=__USER_HOME__
+EnvironmentFile=__ENV_FILE__
+ExecStart=/bin/bash -lc 'source __UV_ENV_FILE__ && cd __PROJECT_DIR__ && uv run uvicorn backend.main:app --host 0.0.0.0 --port __API_PORT__'
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
