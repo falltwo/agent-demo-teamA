@@ -50,5 +50,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# ---------- 專案文件（不推送至遠端） ----------
-docs/
+# ---------- 專案文件 ----------
+# 預設忽略 docs 下其他臨時文件，但保留已納入版本控管的摘要文件
+docs/*
+!docs/README.md
+!docs/update-summary-2026-04-15.md

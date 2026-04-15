@@ -62,6 +62,17 @@ bash scripts/deploy_contract_agent.sh
 
 ---
 
+## 近期更新（2026-04-15）
+
+- `main` 已合併 `weck06-0410` 與 `ewiwi`
+- 已支援 `CHAT_PROVIDER=ollama` 與 `EMBEDDING_PROVIDER=ollama`
+- 已補齊 DGX `FastAPI + Vue` 常駐部署所需的 `systemd` 模板、安裝腳本與部署腳本
+- 前端 production 已支援 runtime API host 推導，後端也補上 `API_CORS_ORIGIN_REGEX`
+- 完整更新總結見 [docs/update-summary-2026-04-15.md](docs/update-summary-2026-04-15.md)
+- 文件索引見 [docs/README.md](docs/README.md)
+
+---
+
 ## 技術亮點
 
 | 面向 | 說明 |
@@ -100,7 +111,7 @@ bash scripts/deploy_contract_agent.sh
 3. 點側欄「一鍵審閱（僅知識庫）」或輸入「請審閱這份合約的風險條款」→ 檢視風險條款與「查看檢索片段」。
 4. 若有 TAVILY_API_KEY：點「一鍵審閱（含法條查詢）」或輸入「合約風險評估並查相關法條」→ 檢視風險＋法條重點＋免責聲明。
 
-完整步驟與檢查清單見 **[docs/Demo_操作指南.md](docs/Demo_操作指南.md)**。
+更新總結、部署背景與文件入口見 **[docs/update-summary-2026-04-15.md](docs/update-summary-2026-04-15.md)** 與 **[docs/README.md](docs/README.md)**。
 
 ---
 
@@ -115,7 +126,7 @@ bash scripts/deploy_contract_agent.sh
 | **expert_agents.py** | 專家子 Agent：合約法遵、財報、ESG、資料分析。 |
 | **eval/** | 題集（eval_set.json、eval_set_contract.json）與 run_eval.py；結果寫入 eval/runs/。 |
 | **data/** | 預設灌入來源（內含 sample.txt、sample_contract_NDA.txt 範例）。 |
-| **docs/** | 競賽對齊、RAG 記憶、Demo 指南、痛點分析、專案檔案結構等；入口 [docs/README.md](docs/README.md)。 |
+| **docs/** | 本輪更新總結與文件索引；入口 [docs/README.md](docs/README.md)。 |
 
 ---
 
@@ -198,6 +209,33 @@ In the browser you can: expand “Upload and ingest documents for this conversat
 
 ---
 
+## DGX internal deployment
+
+For a persistent DGX deployment, use `FastAPI + Vue` with `systemd`:
+
+```bash
+bash scripts/install_dgx_services.sh
+bash scripts/deploy_contract_agent.sh
+```
+
+- API service: `contract-agent-api.service` (default `:8000`)
+- Web service: `contract-agent-web.service` (default `:4173`)
+- In production, the Vue app uses `VITE_API_BASE_URL` first; if unset, it derives the API base from the current browser host plus `:8000`
+- For LAN and Tailscale cross-port access, set `API_CORS_ORIGIN_REGEX` in `.env`
+
+---
+
+## Recent updates (2026-04-15)
+
+- `main` now includes the merged `weck06-0410` and `ewiwi` branches
+- Added `CHAT_PROVIDER=ollama` and `EMBEDDING_PROVIDER=ollama`
+- Added DGX deployment assets: `systemd` templates, service installer, and deployment script
+- Added runtime API host resolution in the Vue app and `API_CORS_ORIGIN_REGEX` support in FastAPI
+- Full update notes: [docs/update-summary-2026-04-15.md](docs/update-summary-2026-04-15.md)
+- Docs index: [docs/README.md](docs/README.md)
+
+---
+
 ## Technical highlights
 
 | Area | Description |
@@ -236,7 +274,7 @@ Modules and data flow (frontend, Agent Router, RAG / contract / law / experts, i
 3. Click sidebar “One-click review (knowledge base only)” or ask “請審閱這份合約的風險條款” → view risk clauses and “View retrieved chunks”.
 4. With TAVILY_API_KEY: click “One-click review (with law lookup)” or ask “合約風險評估並查相關法條” → view risk + law highlights + disclaimer.
 
-Full steps and checklist: **[docs/Demo_操作指南.md](docs/Demo_操作指南.md)**.
+For the latest update notes, deployment context, and docs entry points, see **[docs/update-summary-2026-04-15.md](docs/update-summary-2026-04-15.md)** and **[docs/README.md](docs/README.md)**.
 
 ---
 
@@ -251,7 +289,7 @@ Full steps and checklist: **[docs/Demo_操作指南.md](docs/Demo_操作指南.m
 | **expert_agents.py** | Expert agents: contract compliance, financial, ESG, data analysis. |
 | **eval/** | Eval sets and run_eval.py; results under eval/runs/. |
 | **data/** | Default ingest source (includes sample.txt, sample_contract_NDA.txt). |
-| **docs/** | Competition alignment, RAG memory, Demo guide, etc.; entry [docs/README.md](docs/README.md). |
+| **docs/** | Update summary and docs index; entry [docs/README.md](docs/README.md). |
 
 ---
 
