@@ -79,6 +79,19 @@ const onlineError = ref<unknown>(null);
 const batchError = ref<unknown>(null);
 const detailError = ref<unknown>(null);
 
+const DGX_REQUIRED_SERVICES = [
+  "contract-agent-api.service",
+  "contract-agent-web.service",
+  "ollama.service",
+  "ssh.service",
+] as const;
+
+const RESTARTABLE_SERVICES: readonly string[] = [
+  "contract-agent-api.service",
+  "contract-agent-web.service",
+  "ollama.service",
+];
+
 function asList<T>(value: T[] | undefined | null): T[] {
   return Array.isArray(value) ? value : [];
 }
@@ -351,6 +364,91 @@ const previewResultsText = computed(() => {
   return rows.map((row) => toPrettyJson(row)).join("\n\n");
 });
 
+function isServiceHealthy(row: AdminServiceStatus | undefined): boolean {
+  if (!row || row.error) {
+    return false;
+  }
+  return (
+    row.active_state === "active" &&
+    row.sub_state === "running" &&
+    row.unit_file_state === "enabled"
+  );
+}
+
+function isServiceEnabled(row: AdminServiceStatus | undefined): boolean {
+  if (!row || row.error) {
+    return false;
+  }
+  return row.unit_file_state === "enabled";
+}
+
+const dgxEnabled = computed<boolean | null>(() => {
+  if (!serviceRows.value.length) {
+    return null;
+  }
+  return DGX_REQUIRED_SERVICES.every((serviceName) => {
+    const row = serviceRows.value.find((x) => x.name === serviceName);
+    return isServiceHealthy(row);
+  });
+});
+
+const dgxStatusLabel = computed(() => {
+  if (dgxEnabled.value == null) {
+    return "檢查中";
+  }
+  return dgxEnabled.value ? "啟用中" : "未啟用";
+});
+
+const dgxStatusHint = computed(() => {
+  if (!serviceRows.value.length) {
+    return "尚未取得服務狀態";
+  }
+  const failed = DGX_REQUIRED_SERVICES.filter((serviceName) => {
+    const row = serviceRows.value.find((x) => x.name === serviceName);
+    return !isServiceHealthy(row);
+  });
+  if (!failed.length) {
+    return "API / Web / Ollama 皆正常";
+  }
+  return `異常服務：${failed.join(", ")}`;
+});
+
+const autostartEnabled = computed<boolean | null>(() => {
+  if (!serviceRows.value.length) {
+    return null;
+  }
+  return DGX_REQUIRED_SERVICES.every((serviceName) => {
+    const row = serviceRows.value.find((x) => x.name === serviceName);
+    return isServiceEnabled(row);
+  });
+});
+
+const autostartStatusLabel = computed(() => {
+  if (autostartEnabled.value == null) {
+    return "檢查中";
+  }
+  return autostartEnabled.value ? "已啟用" : "未啟用";
+});
+
+const sshStatusLabel = computed(() => {
+  const sshRow = serviceRows.value.find((x) => x.name === "ssh.service");
+  if (!sshRow) {
+    return "檢查中";
+  }
+  return isServiceHealthy(sshRow) ? "已啟用" : "未啟用";
+});
+
+const sshStatusHint = computed(() => {
+  const sshRow = serviceRows.value.find((x) => x.name === "ssh.service");
+  if (!sshRow) {
+    return "尚未取得 SSH 服務資訊";
+  }
+  if (sshRow.error) {
+    return `SSH 服務異常：${sshRow.error}`;
+  }
+  return `active=${sshRow.active_state}, unit=${sshRow.unit_file_state}`;
+});
+
 watch(selectedRunId, (runId) => {
   void loadBatchDetail(runId);
 });
@@ -413,6 +511,21 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
           <span class="k">版本</span>
           <strong class="v">{{ health.version }}</strong>
         </div>
+        <div class="stat-item">
+          <span class="k">DGX 啟用狀態</span>
+          <strong class="v">{{ dgxStatusLabel }}</strong>
+          <p class="hint">{{ dgxStatusHint }}</p>
+        </div>
+        <div class="stat-item">
+          <span class="k">開機自啟</span>
+          <strong class="v">{{ autostartStatusLabel }}</strong>
+          <p class="hint">檢查 API / Web / Ollama / SSH 的 unit 啟用狀態</p>
+        </div>
+        <div class="stat-item">
+          <span class="k">SSH 啟用</span>
+          <strong class="v">{{ sshStatusLabel }}</strong>
+          <p class="hint">{{ sshStatusHint }}</p>
+        </div>
       </div>
     </section>
 
@@ -451,10 +564,10 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
               <button
                 type="button"
                 class="ds-btn ds-btn--secondary"
-                :disabled="restarting"
+                :disabled="restarting || !RESTARTABLE_SERVICES.includes(row.name)"
                 @click="void restartServices([row.name])"
               >
-                重啟
+                {{ RESTARTABLE_SERVICES.includes(row.name) ? "重啟" : "僅監控" }}
               </button>
             </td>
           </tr>
@@ -770,7 +883,7 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--space-2);
 }
 

@@ -13,7 +13,14 @@ from backend.schemas.admin import (
     ServiceStatus,
 )
 
-ALLOWED_SERVICES = (
+MONITORED_SERVICES = (
+    "contract-agent-api.service",
+    "contract-agent-web.service",
+    "ollama.service",
+    "ssh.service",
+)
+
+RESTARTABLE_SERVICES = (
     "contract-agent-api.service",
     "contract-agent-web.service",
     "ollama.service",
@@ -56,7 +63,7 @@ def _parse_service_show(output: str) -> tuple[str, str, str, str | None]:
 
 
 def get_service_status(service_name: str) -> ServiceStatus:
-    if service_name not in ALLOWED_SERVICES:
+    if service_name not in MONITORED_SERVICES:
         return ServiceStatus(name=service_name, error="service not allowed")
 
     proc = _run_cmd(
@@ -88,7 +95,7 @@ def get_service_status(service_name: str) -> ServiceStatus:
 
 
 def list_services_status() -> list[ServiceStatus]:
-    return [get_service_status(name) for name in ALLOWED_SERVICES]
+    return [get_service_status(name) for name in MONITORED_SERVICES]
 
 
 def restart_services(services: list[str]) -> tuple[list[str], list[str], list[ServiceStatus]]:
@@ -168,4 +175,3 @@ def list_docker_containers() -> DockerContainersResponse:
         )
 
     return DockerContainersResponse(engine_available=True, containers=containers)
-

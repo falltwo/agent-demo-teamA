@@ -26,7 +26,7 @@ def post_restart_services(body: ServicesRestartRequest) -> ServicesRestartRespon
     if not requested:
         raise HTTPException(status_code=400, detail="services cannot be empty")
 
-    not_allowed = [x for x in requested if x not in admin_service.ALLOWED_SERVICES]
+    not_allowed = [x for x in requested if x not in admin_service.RESTARTABLE_SERVICES]
     if not_allowed:
         raise HTTPException(
             status_code=400,
