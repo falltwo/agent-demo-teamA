@@ -79,13 +79,6 @@ const onlineError = ref<unknown>(null);
 const batchError = ref<unknown>(null);
 const detailError = ref<unknown>(null);
 
-const DGX_REQUIRED_SERVICES = [
-  "contract-agent-api.service",
-  "contract-agent-web.service",
-  "ollama.service",
-  "ssh.service",
-] as const;
-
 const RESTARTABLE_SERVICES: readonly string[] = [
   "contract-agent-api.service",
   "contract-agent-web.service",
@@ -364,17 +357,6 @@ const previewResultsText = computed(() => {
   return rows.map((row) => toPrettyJson(row)).join("\n\n");
 });
 
-function isServiceHealthy(row: AdminServiceStatus | undefined): boolean {
-  if (!row || row.error) {
-    return false;
-  }
-  return (
-    row.active_state === "active" &&
-    row.sub_state === "running" &&
-    row.unit_file_state === "enabled"
-  );
-}
-
 function isServiceEnabled(row: AdminServiceStatus | undefined): boolean {
   if (!row || row.error) {
     return false;
@@ -382,72 +364,70 @@ function isServiceEnabled(row: AdminServiceStatus | undefined): boolean {
   return row.unit_file_state === "enabled";
 }
 
-const dgxEnabled = computed<boolean | null>(() => {
-  if (!serviceRows.value.length) {
-    return null;
+const powerOn = computed<boolean | null>(() => {
+  if (health.value) {
+    return String(health.value.status).toLowerCase() === "ok";
   }
-  return DGX_REQUIRED_SERVICES.every((serviceName) => {
-    const row = serviceRows.value.find((x) => x.name === serviceName);
-    return isServiceHealthy(row);
-  });
+  if (healthError.value) {
+    return false;
+  }
+  return null;
 });
 
-const dgxStatusLabel = computed(() => {
-  if (dgxEnabled.value == null) {
+const powerStatusLabel = computed(() => {
+  if (powerOn.value == null) {
     return "檢查中";
   }
-  return dgxEnabled.value ? "啟用中" : "未啟用";
+  return powerOn.value ? "已開機" : "未開機 / 異常";
 });
 
-const dgxStatusHint = computed(() => {
-  if (!serviceRows.value.length) {
-    return "尚未取得服務狀態";
+const powerStatusHint = computed(() => {
+  if (health.value) {
+    return `/health=${health.value.status}`;
   }
-  const failed = DGX_REQUIRED_SERVICES.filter((serviceName) => {
-    const row = serviceRows.value.find((x) => x.name === serviceName);
-    return !isServiceHealthy(row);
-  });
-  if (!failed.length) {
-    return "API / Web / Ollama 皆正常";
+  if (healthError.value) {
+    return "無法讀取 /health，請確認 API 服務狀態";
   }
-  return `異常服務：${failed.join(", ")}`;
+  return "尚未取得健康檢查資料";
 });
 
-const autostartEnabled = computed<boolean | null>(() => {
-  if (!serviceRows.value.length) {
-    return null;
-  }
-  return DGX_REQUIRED_SERVICES.every((serviceName) => {
-    const row = serviceRows.value.find((x) => x.name === serviceName);
-    return isServiceEnabled(row);
-  });
-});
+const sshRow = computed<AdminServiceStatus | undefined>(() =>
+  serviceRows.value.find((x) => x.name === "ssh.service"),
+);
 
-const autostartStatusLabel = computed(() => {
-  if (autostartEnabled.value == null) {
-    return "檢查中";
+const sshEnabled = computed<boolean | null>(() => {
+  if (sshRow.value) {
+    return isServiceEnabled(sshRow.value);
   }
-  return autostartEnabled.value ? "已啟用" : "未啟用";
+  if (servicesError.value) {
+    return false;
+  }
+  return null;
 });
 
 const sshStatusLabel = computed(() => {
-  const sshRow = serviceRows.value.find((x) => x.name === "ssh.service");
-  if (!sshRow) {
+  if (sshEnabled.value == null) {
     return "檢查中";
   }
-  return isServiceHealthy(sshRow) ? "已啟用" : "未啟用";
+  return sshEnabled.value ? "已啟用" : "未啟用";
 });
 
 const sshStatusHint = computed(() => {
-  const sshRow = serviceRows.value.find((x) => x.name === "ssh.service");
-  if (!sshRow) {
+  if (!sshRow.value) {
     return "尚未取得 SSH 服務資訊";
   }
-  if (sshRow.error) {
-    return `SSH 服務異常：${sshRow.error}`;
+  if (sshRow.value.error) {
+    return `SSH 服務查詢失敗：${sshRow.value.error}`;
   }
-  return `active=${sshRow.active_state}, unit=${sshRow.unit_file_state}`;
+  return `active=${sshRow.value.active_state}, sub=${sshRow.value.sub_state}, unit=${sshRow.value.unit_file_state}`;
 });
+
+function statusLightClass(ok: boolean | null): string {
+  if (ok == null) {
+    return "status-light--neutral";
+  }
+  return ok ? "status-light--green" : "status-light--red";
+}
 
 watch(selectedRunId, (runId) => {
   void loadBatchDetail(runId);
@@ -498,32 +478,33 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
         <h2 class="section-title">健康檢查</h2>
       </div>
       <ApiErrorBlock v-if="healthError" :error="healthError" title="健康檢查讀取失敗" />
-      <div v-else-if="health" class="stat-grid">
+      <div class="stat-grid">
         <div class="stat-item">
           <span class="k">狀態</span>
-          <strong class="v">{{ health.status }}</strong>
+          <strong class="v">{{ health?.status || "-" }}</strong>
         </div>
         <div class="stat-item">
           <span class="k">服務</span>
-          <strong class="v">{{ health.service }}</strong>
+          <strong class="v">{{ health?.service || "-" }}</strong>
         </div>
         <div class="stat-item">
           <span class="k">版本</span>
-          <strong class="v">{{ health.version }}</strong>
+          <strong class="v">{{ health?.version || "-" }}</strong>
         </div>
         <div class="stat-item">
-          <span class="k">DGX 啟用狀態</span>
-          <strong class="v">{{ dgxStatusLabel }}</strong>
-          <p class="hint">{{ dgxStatusHint }}</p>
+          <span class="k">電源狀態（是否開機）</span>
+          <strong class="v status-with-light">
+            <span class="status-light" :class="statusLightClass(powerOn)" />
+            <span>{{ powerStatusLabel }}</span>
+          </strong>
+          <p class="hint">{{ powerStatusHint }}</p>
         </div>
         <div class="stat-item">
-          <span class="k">開機自啟</span>
-          <strong class="v">{{ autostartStatusLabel }}</strong>
-          <p class="hint">檢查 API / Web / Ollama / SSH 的 unit 啟用狀態</p>
-        </div>
-        <div class="stat-item">
-          <span class="k">SSH 啟用</span>
-          <strong class="v">{{ sshStatusLabel }}</strong>
+          <span class="k">SSH 是否啟用</span>
+          <strong class="v status-with-light">
+            <span class="status-light" :class="statusLightClass(sshEnabled)" />
+            <span>{{ sshStatusLabel }}</span>
+          </strong>
           <p class="hint">{{ sshStatusHint }}</p>
         </div>
       </div>
@@ -902,6 +883,35 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
 
 .stat-item .v {
   color: var(--color-text-primary);
+}
+
+.status-with-light {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-light {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.status-light--green {
+  background: #22c55e;
+  border-color: #16a34a;
+}
+
+.status-light--red {
+  background: #ef4444;
+  border-color: #dc2626;
+}
+
+.status-light--neutral {
+  background: #9ca3af;
+  border-color: #6b7280;
 }
 
 .table {
