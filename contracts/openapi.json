@@ -1,0 +1,904 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "agent-demo API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Post Chat",
+        "description": "送出一則使用者訊息並取得回答（與 Streamlit 主流程相同之 `answer_with_rag_and_log`）。",
+        "operationId": "post_chat_api_v1_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/upload": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Post Ingest Upload",
+        "description": "多部分表單：`files` 為檔案欄位（可重複），`chat_id` 為一般表單欄位。\n行為對齊 Streamlit「灌入到向量庫」：同步完成後回傳 chunk 數與本次更新的來源列。",
+        "operationId": "post_ingest_upload_api_v1_ingest_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_ingest_upload_api_v1_ingest_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestUploadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sources": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Get Sources",
+        "description": "對齊 `sources_registry.list_sources`（側欄「是否有上傳」與來源列表）。",
+        "operationId": "get_sources_api_v1_sources_get",
+        "parameters": [
+          {
+            "name": "chat_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Chat Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcesListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/config": {
+      "get": {
+        "tags": [
+          "eval"
+        ],
+        "summary": "Get Eval Config",
+        "description": "是否啟用 EVAL 寫入（與 eval_log.is_enabled() 一致）。",
+        "operationId": "get_eval_config_api_v1_eval_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/runs": {
+      "get": {
+        "tags": [
+          "eval"
+        ],
+        "summary": "Get Eval Runs",
+        "description": "線上運行記錄（eval_runs.jsonl），新到舊最多 limit 筆。",
+        "operationId": "get_eval_runs_api_v1_eval_runs_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 500,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/batch/runs": {
+      "get": {
+        "tags": [
+          "eval"
+        ],
+        "summary": "List Eval Batch Runs",
+        "description": "列出 eval/runs 下各批次 run id。",
+        "operationId": "list_eval_batch_runs_api_v1_eval_batch_runs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalBatchListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eval/batch/{run_id}": {
+      "get": {
+        "tags": [
+          "eval"
+        ],
+        "summary": "Get Eval Batch Detail",
+        "description": "單一批次：metrics + 逐題 results。",
+        "operationId": "get_eval_batch_detail_api_v1_eval_batch__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalBatchDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/info": {
+      "get": {
+        "tags": [
+          "stub"
+        ],
+        "summary": "Stub Info",
+        "description": "最小可運行範例：後續可改為真實 chat／ingest 端點。",
+        "operationId": "stub_info_api_v1_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StubInfoResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_post_ingest_upload_api_v1_ingest_upload_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "一或多個 .txt / .md / .pdf / .docx"
+          },
+          "chat_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Id",
+            "description": "對話 id；與 Streamlit `active_conv_id` 一致，寫入 metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_post_ingest_upload_api_v1_ingest_upload_post"
+      },
+      "ChatMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage"
+      },
+      "ChatRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Message",
+            "description": "本輪使用者問題（或一鍵審閱預設句）"
+          },
+          "top_k": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "default": 5
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "strict": {
+            "type": "boolean",
+            "title": "Strict",
+            "description": "True 時等同側欄「嚴格只根據知識庫回答」；False 時走完整路由",
+            "default": false
+          },
+          "chat_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Id"
+          },
+          "rag_scope_chat_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rag Scope Chat Id",
+            "description": "若設定，檢索僅限該對話上傳之 chunks（對齊「只搜尋此對話上傳的檔案」）"
+          },
+          "original_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Question"
+          },
+          "clarification_reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification Reply"
+          },
+          "chart_confirmation_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chart Confirmation Question"
+          },
+          "chart_confirmation_reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chart Confirmation Reply"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "ChatRequest",
+        "description": "對齊 `streamlit_app` 呼叫 `answer_with_rag_and_log` 時所帶參數。"
+      },
+      "ChatResponse": {
+        "properties": {
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ChunkItem"
+            },
+            "type": "array",
+            "title": "Chunks"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "extra": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra"
+          },
+          "latency_sec": {
+            "type": "number",
+            "title": "Latency Sec",
+            "description": "本次呼叫耗時（秒），供觀測用"
+          },
+          "next_original_question_for_clarification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Original Question For Clarification",
+            "description": "當 tool_name 為 ask_web_vs_rag 時，下一輪請帶入 original_question"
+          },
+          "next_chart_confirmation_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Chart Confirmation Question",
+            "description": "當本輪詢問是否產圖時，下一輪請帶入 chart_confirmation_question"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer",
+          "sources",
+          "chunks",
+          "tool_name",
+          "latency_sec"
+        ],
+        "title": "ChatResponse"
+      },
+      "ChunkItem": {
+        "properties": {
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "default": ""
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "default": ""
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "ChunkItem",
+        "description": "檢索片段；與 rag 流程 `chunks` 一致，允許額外欄位。"
+      },
+      "EvalBatchDetailResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics"
+          },
+          "results": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Results",
+            "description": "run_*_results.jsonl 每行一筆原始 JSON"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "EvalBatchDetailResponse",
+        "description": "GET /api/v1/eval/batch/{run_id}"
+      },
+      "EvalBatchListResponse": {
+        "properties": {
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Run Ids"
+          },
+          "runs_dir": {
+            "type": "string",
+            "title": "Runs Dir",
+            "description": "解析後之批次結果目錄（供除錯／說明）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs_dir"
+        ],
+        "title": "EvalBatchListResponse",
+        "description": "GET /api/v1/eval/batch/runs"
+      },
+      "EvalConfigResponse": {
+        "properties": {
+          "eval_log_enabled": {
+            "type": "boolean",
+            "title": "Eval Log Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_log_enabled"
+        ],
+        "title": "EvalConfigResponse",
+        "description": "GET /api/v1/eval/config"
+      },
+      "EvalRunEntry": {
+        "properties": {
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question",
+            "default": ""
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer",
+            "default": ""
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name",
+            "default": ""
+          },
+          "latency_sec": {
+            "type": "number",
+            "title": "Latency Sec",
+            "default": 0.0
+          },
+          "top_k": {
+            "type": "integer",
+            "title": "Top K",
+            "default": 0
+          },
+          "source_count": {
+            "type": "integer",
+            "title": "Source Count",
+            "default": 0
+          },
+          "chat_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Id"
+          }
+        },
+        "type": "object",
+        "title": "EvalRunEntry",
+        "description": "單筆線上運行記錄（eval_runs.jsonl 一行）。"
+      },
+      "EvalRunsResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRunEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "eval_log_enabled": {
+            "type": "boolean",
+            "title": "Eval Log Enabled",
+            "description": "是否啟用寫入 EVAL_LOG（與 eval_log.is_enabled() 一致）；不影響讀取既有檔案。"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "本次載入筆數上限",
+            "default": 500
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_log_enabled"
+        ],
+        "title": "EvalRunsResponse",
+        "description": "GET /api/v1/eval/runs — 與 eval_log.load_runs(limit) 一致（新到舊）。"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "ok",
+            "examples": [
+              "ok"
+            ]
+          },
+          "service": {
+            "type": "string",
+            "title": "Service",
+            "default": "agent-demo-api"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "default": "0.1.0"
+          }
+        },
+        "type": "object",
+        "title": "HealthResponse"
+      },
+      "IngestUploadResponse": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "sync",
+            "title": "Mode",
+            "default": "sync"
+          },
+          "chunks_ingested": {
+            "type": "integer",
+            "title": "Chunks Ingested",
+            "description": "寫入 Pinecone 的 chunk 數"
+          },
+          "sources_updated": {
+            "items": {
+              "$ref": "#/components/schemas/SourceEntry"
+            },
+            "type": "array",
+            "title": "Sources Updated"
+          },
+          "skipped_files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped Files",
+            "description": "因副檔名／檔名不合法而略過的原始檔名（若有）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunks_ingested"
+        ],
+        "title": "IngestUploadResponse",
+        "description": "同步灌入完成回應（與 Streamlit 按鈕後等待結果一致）。"
+      },
+      "SourceEntry": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "chunk_count": {
+            "type": "integer",
+            "title": "Chunk Count"
+          },
+          "chat_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "chunk_count"
+        ],
+        "title": "SourceEntry",
+        "description": "與 `sources_registry.update_registry_on_ingest` 寫入之一筆一致。"
+      },
+      "SourcesListResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "title": "SourcesListResponse"
+      },
+      "StubInfoResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "stub"
+          },
+          "api_version": {
+            "type": "string",
+            "title": "Api Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "api_version"
+        ],
+        "title": "StubInfoResponse",
+        "description": "最小範例端點：確認路由與設定載入。"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

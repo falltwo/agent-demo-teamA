@@ -1,0 +1,46 @@
+/* 載入骨架（方案 A 紙感，不搶 accent） */
+@keyframes ds-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.ds-skeleton {
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-muted) 0%,
+    var(--color-border-subtle) 50%,
+    var(--color-bg-muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: ds-skeleton-shimmer 1.15s ease-in-out infinite;
+}
+
+.ds-skeleton-line {
+  height: 0.85em;
+  margin-bottom: var(--space-2);
+}
+
+.ds-skeleton-line:last-child {
+  margin-bottom: 0;
+}
+
+.ds-skeleton-block {
+  min-height: 120px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

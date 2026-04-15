@@ -1,0 +1,96 @@
+/**
+ * 設計系統 — 方案 A：專業文件風（合約／法遵 RAG 聊天）
+ * - 紙感背景、墨藍強調、襯線標題 + 無襯線正文
+ * - 8pt grid；僅 light，深色另開 direction-b 或後續 .theme-dark
+ *
+ * Vue/Vite：在 main.ts import "./styles/direction-a-tokens.css"
+ * Tailwind：見 frontend/README.md 對應 @theme / extend
+ */
+
+:root {
+  /* --- 色票（語意） --- */
+  --color-bg-app: #f4f1ec;
+  --color-bg-surface: #fffcf7;
+  --color-bg-elevated: #ffffff;
+  --color-bg-muted: #ebe6df;
+  --color-border-subtle: #e2ddd4;
+  --color-border-strong: #c9c2b8;
+
+  --color-text-primary: #1c1b19;
+  --color-text-secondary: #5c5854;
+  --color-text-muted: #8a847c;
+
+  --color-accent: #1e4d6b;
+  --color-accent-hover: #163a52;
+  --color-accent-muted: #e8f0f5;
+  --color-accent-on-accent: #fffcf7;
+
+  --color-success: #2d6a4f;
+  --color-success-muted: #e6f2ec;
+  --color-warning: #b45309;
+  --color-warning-muted: #fef3e2;
+  --color-danger: #b42318;
+  --color-danger-muted: #fceeed;
+
+  /* --- 字體（實作時於 index.html 以 link 載入 Google Fonts 或本地） --- */
+  --font-display: "Source Serif 4", "Noto Serif TC", "Iowan Old Style", Georgia, serif;
+  --font-body: "DM Sans", "Noto Sans TC", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+
+  /* --- 字階 --- */
+  --text-display-size: 1.75rem;
+  --text-display-leading: 1.2;
+  --text-title-size: 1.25rem;
+  --text-title-leading: 1.3;
+  --text-body-size: 0.9375rem;
+  --text-body-leading: 1.6;
+  --text-body-sm-size: 0.8125rem;
+  --text-body-sm-leading: 1.55;
+  --text-caption-size: 0.75rem;
+  --text-caption-leading: 1.45;
+  --text-code-size: 0.8125rem;
+
+  /* --- 圓角 --- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 9999px;
+
+  /* --- 陰影 --- */
+  --shadow-sm: 0 1px 2px rgb(28 27 25 / 0.05);
+  --shadow-md: 0 4px 12px rgb(28 27 25 / 0.08);
+  --shadow-popover: 0 12px 32px rgb(28 27 25 / 0.12);
+
+  /* --- 8pt grid（spacing）--- */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 40px;
+  --space-7: 48px;
+
+  /* --- 版面 --- */
+  --chat-max-width: 720px;
+  --sidebar-width: 280px;
+  --focus-ring: 2px solid var(--color-accent);
+  --focus-ring-offset: 2px;
+}
+
+/* 全站基底（可依需要拆到 App.vue 或 @layer base） */
+.ds-a {
+  background-color: var(--color-bg-app);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
+}
+
+.ds-a h1,
+.ds-a .font-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}

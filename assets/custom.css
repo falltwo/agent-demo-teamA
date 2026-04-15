@@ -1,24 +1,63 @@
 /* ==========================================================================
-   RAG 智慧問答 自訂樣式
-   主色 #1E3A8A、按鈕 #3B82F6、背景 #F8FAFC、警告 #EF4444、成功 #22C55E
+   合約／法遵審閱助理 — 自訂樣式
+   色票（請與 .streamlit/config.toml [theme] 同步）：
+   --ink #0F172A  --brand #1E3A8A  --primary #3B82F6
+   --bg #F8FAFC  --surface #F1F5F9  --border rgba(30,58,138,0.12)
+   --danger #B91C1C  --ok #15803D
    ========================================================================== */
 
-/* --------------------------------------------------------------------------
-   主內容區：背景與留白（背景 #F8FAFC）
-   -------------------------------------------------------------------------- */
-.block-container {
-    max-width: 900px;
-    padding-top: 1.5rem;
-    padding-bottom: 4rem;
-    background: #F8FAFC;
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap");
+
+:root {
+    --app-ink: #0f172a;
+    --app-brand: #1e3a8a;
+    --app-primary: #3b82f6;
+    --app-bg: #f8fafc;
+    --app-surface: #f1f5f9;
+    --app-border: rgba(30, 58, 138, 0.12);
+    --app-muted: #64748b;
+    --app-danger: #b91c1c;
+    --app-danger-bg: #fef2f2;
+    --app-radius-lg: 16px;
+    --app-radius-md: 12px;
+    --app-radius-sm: 10px;
 }
 
-/* 標題：主色 #1E3A8A */
+html,
+body,
+[data-testid="stAppViewContainer"] {
+    font-family: "Noto Sans TC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* --------------------------------------------------------------------------
+   主內容區：背景與留白
+   -------------------------------------------------------------------------- */
+.block-container {
+    max-width: 960px;
+    padding-top: 1.25rem;
+    padding-bottom: 4rem;
+    background: var(--app-bg);
+}
+
+/* 標題：主色 */
 h1 {
     letter-spacing: -0.02em;
     font-weight: 700;
-    margin-bottom: 0.25rem !important;
-    color: #1E3A8A !important;
+    margin-bottom: 0.35rem !important;
+    color: var(--app-brand) !important;
+    font-size: clamp(1.65rem, 2.5vw, 2rem);
+}
+
+h2,
+h3 {
+    color: var(--app-ink);
+}
+
+/* 主區一般內文可讀性 */
+[data-testid="stAppViewContainer"] .main .stMarkdown {
+    line-height: 1.65;
+    font-size: 1rem;
+    color: var(--app-ink);
 }
 
 /* --------------------------------------------------------------------------
@@ -26,25 +65,80 @@ h1 {
    -------------------------------------------------------------------------- */
 [data-testid="stChatMessage"] {
     padding: 1rem 1.25rem;
-    border-radius: 16px;
-    border: 1px solid rgba(30, 58, 138, 0.2);
-    background: transparent;
-    margin-bottom: 0.75rem;
+    border-radius: var(--app-radius-lg);
+    border: 1px solid var(--app-border);
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    margin-bottom: 0.85rem;
 }
 [data-testid="stChatMessage"] p {
-    margin-bottom: 0.5em;
+    margin-bottom: 0.55em;
+}
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
+    line-height: 1.7;
+}
+/* 訊息內多個摺疊區：垂直節奏 */
+[data-testid="stChatMessage"] [data-testid="stExpander"] {
+    margin-top: 0.65rem;
+}
+[data-testid="stChatMessage"] .stCaption {
+    margin-top: 0.5rem;
+    color: var(--app-muted);
 }
 
 /* 使用者訊息靠右，按鈕主色 #3B82F6 邊框 */
 [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
     margin-left: 2rem;
-    border-color: rgba(59, 130, 246, 0.4);
-    background: transparent;
+    border-color: rgba(59, 130, 246, 0.35);
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
 }
 
 /* --------------------------------------------------------------------------
-   側欄：區塊標題與分隔
+   側欄：品牌、分區標題、區塊標題與分隔
    -------------------------------------------------------------------------- */
+.sidebar-brand {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--app-brand);
+    margin: 0 0 0.35rem 0;
+    opacity: 0.92;
+}
+.sidebar-section-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--app-muted);
+    margin: 1rem 0 0.4rem 0;
+}
+.sidebar-section-title:first-of-type {
+    margin-top: 0.15rem;
+}
+.sidebar-danger-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--app-danger);
+    margin: 0.75rem 0 0.35rem 0;
+}
+.sidebar-danger-hint {
+    font-size: 0.72rem;
+    color: var(--app-muted);
+    line-height: 1.45;
+    margin: 0 0 0.5rem 0;
+}
+.sidebar-danger-block {
+    border: 1px dashed rgba(185, 28, 28, 0.35);
+    border-radius: var(--app-radius-md);
+    background: var(--app-danger-bg);
+    padding: 0.65rem 0.75rem;
+    margin: 0.5rem 0 0.35rem 0;
+}
+.sidebar-danger-block .sidebar-danger-label {
+    margin-top: 0;
+}
+
 [data-testid="stSidebar"] .stMarkdown {
     margin-bottom: 0.25rem;
 }
@@ -59,26 +153,46 @@ h1 {
 }
 [data-testid="stSidebar"] hr {
     margin: 1rem 0;
-    border-color: rgba(30, 58, 138, 0.15);
+    border: none;
+    border-top: 1px solid var(--app-border);
 }
 
-/* 按鈕：圓角（主色 #3B82F6 由 .streamlit/config.toml primaryColor 控制） */
+/* 按鈕：圓角（主色由 config.toml primaryColor 控制） */
 [data-testid="stSidebar"] button {
-    border-radius: 10px;
+    border-radius: var(--app-radius-sm);
     font-weight: 500;
+    min-height: 2.5rem;
+}
+
+/* 清空資料庫：緊接在含 .sidebar-danger-block 區塊之後的 secondary 按鈕 */
+[data-testid="stSidebar"] *:has(.sidebar-danger-block) + * button[kind="secondary"],
+[data-testid="stSidebar"] *:has(.sidebar-danger-block) + * [data-testid="baseButton-secondary"] {
+    border: 1px solid rgba(185, 28, 28, 0.4) !important;
+    color: var(--app-danger) !important;
+    background: #ffffff !important;
+}
+[data-testid="stSidebar"] *:has(.sidebar-danger-block) + * button[kind="secondary"]:hover,
+[data-testid="stSidebar"] *:has(.sidebar-danger-block) + * [data-testid="baseButton-secondary"]:hover {
+    border-color: rgba(185, 28, 28, 0.6) !important;
+    background: #fee2e2 !important;
 }
 
 /* --------------------------------------------------------------------------
    展開器：較柔和邊框
    -------------------------------------------------------------------------- */
 [data-testid="stExpander"] {
-    border-radius: 12px;
-    border: 1px solid rgba(30, 58, 138, 0.15);
+    border-radius: var(--app-radius-md);
+    border: 1px solid var(--app-border);
     overflow: hidden;
+    background: #ffffff;
 }
 [data-testid="stExpander"] summary {
-    font-weight: 500;
-    color: #1E3A8A;
+    font-weight: 600;
+    color: var(--app-brand);
+    padding: 0.65rem 0.85rem;
+}
+[data-testid="stExpander"] [data-testid="stMarkdownContainer"] {
+    padding: 0 0.85rem 0.85rem;
 }
 
 /* 輸入框與滑桿在側欄的視覺 */
@@ -87,34 +201,77 @@ h1 {
     font-size: 0.9rem;
 }
 
-/* 頁尾留白，避免輸入框擋住最後一則訊息 */
+/* 頁尾：輸入區與主內容分隔 */
 .stChatInput {
-    padding-bottom: 1rem;
+    padding: 0.75rem 0 1rem;
+    border-top: 1px solid var(--app-border);
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0) 0%, var(--app-bg) 28%);
+}
+[data-testid="stChatInput"] textarea {
+    border-radius: var(--app-radius-md) !important;
+    min-height: 2.75rem;
 }
 
 /* --------------------------------------------------------------------------
    標題下方副標：編輯感
    -------------------------------------------------------------------------- */
 .app-tagline {
-    font-size: 0.95rem;
-    color: #1E3A8A;
-    opacity: 0.85;
-    margin-bottom: 1.5rem;
-    font-weight: 400;
+    font-size: 0.92rem;
+    color: var(--app-muted);
+    margin-bottom: 1.35rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
+.app-hero-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: -0.35rem 0 1.25rem 0;
+}
+.app-hero-pills span {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--app-brand);
+    background: #ffffff;
+    border: 1px solid var(--app-border);
+    border-radius: 999px;
+    padding: 0.2rem 0.65rem;
 }
 
 /* --------------------------------------------------------------------------
-   Eval 頁：指標卡片
+   Eval 頁：儀表板感指標卡
    -------------------------------------------------------------------------- */
+.eval-dashboard-head {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--app-muted);
+    margin: 0 0 0.5rem 0;
+}
 [data-testid="stMetric"] {
-    background: rgba(248, 250, 252, 0.9);
-    padding: 1rem;
-    border-radius: 12px;
-    border: 1px solid rgba(30, 58, 138, 0.15);
+    background: #ffffff;
+    padding: 1rem 1.1rem;
+    border-radius: var(--app-radius-md);
+    border: 1px solid var(--app-border);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 [data-testid="stMetric"] label {
-    color: #1E3A8A !important;
-    font-size: 0.8rem !important;
+    color: var(--app-brand) !important;
+    font-size: 0.78rem !important;
+    font-weight: 600 !important;
+}
+[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    color: var(--app-ink) !important;
+    font-weight: 700 !important;
+}
+
+/* Eval 篩選列：與主內容區隔 */
+[data-testid="stAppViewContainer"] .main [data-testid="stVerticalBlock"] > div [data-testid="stCaption"] {
+    color: var(--app-muted);
 }
 
 /* 語意色：成功 #22C55E、警告 #EF4444（Streamlit 內建元件會用 config 的 greenColor/redColor） */
