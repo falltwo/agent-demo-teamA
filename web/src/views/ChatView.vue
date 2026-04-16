@@ -22,6 +22,16 @@ type SourceRow = {
   chat_id: string | null;
 };
 
+type RailTab = "risk" | "assistant";
+
+type RiskCard = {
+  id: string;
+  title: string;
+  summary: string;
+  severity: "high" | "medium" | "low";
+  section: string;
+};
+
 const conversation = useConversationStore();
 const settings = useSettingsStore();
 
@@ -29,16 +39,15 @@ const input = ref("");
 const sending = ref(false);
 const chatError = ref<unknown>(null);
 const settingsOpen = ref(false);
-const showRetrievalHint = ref(true);
 const scopeSyncState = ref<"loading" | "has" | "none" | "error">("loading");
-
-const messageListEl = ref<HTMLElement | null>(null);
-const stickToBottom = ref(true);
+const railTab = ref<RailTab>("risk");
 
 const sourceRows = ref<SourceRow[]>([]);
 const preview = ref<SourcePreviewResponse | null>(null);
 const previewLoading = ref(false);
 const currentPreviewPage = ref(0);
+const assistantFeedEl = ref<HTMLElement | null>(null);
+const stickToBottom = ref(true);
 
 const activeConversation = computed(() => conversation.activeConversation);
 
@@ -68,10 +77,10 @@ const latestContractAssistant = computed(() => {
 });
 
 const currentDocumentTitle = computed(() => {
-  if (preview.value?.title) {
-    return preview.value.title;
+  if (preview.value?.title?.trim()) {
+    return preview.value.title.trim();
   }
-  return activeConversation.value?.title || "新對話";
+  return activeConversation.value?.title?.trim() || "Contract Preview";
 });
 
 const previewParagraphs = computed(() => {
@@ -83,7 +92,7 @@ const previewParagraphs = computed(() => {
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean)
-    .slice(0, 24);
+    .slice(0, 36);
 });
 
 const previewPages = computed(() => {
@@ -105,7 +114,7 @@ const activePreviewPageParagraphs = computed(() => {
 
 const pageLabel = computed(() => {
   const total = Math.max(1, previewPages.value.length);
-  return `第 ${Math.min(currentPreviewPage.value + 1, total)} / ${total} 頁`;
+  return `Page ${Math.min(currentPreviewPage.value + 1, total)} of ${total}`;
 });
 
 const canGoToPreviousPreviewPage = computed(() => currentPreviewPage.value > 0);
@@ -113,55 +122,89 @@ const canGoToNextPreviewPage = computed(
   () => currentPreviewPage.value < previewPages.value.length - 1,
 );
 
-const issueCards = computed(() => {
-  const chunks = latestContractAssistant.value?.chunks ?? [];
-  return chunks.slice(0, 4).map((chunk, index) => ({
-    id: `${index}-${chunk.tag || "issue"}`,
-    title: chunk.tag || `條款 ${index + 1}`,
-    summary: chunk.text || "此條款需要進一步審閱。",
-    severity: index === 0 ? "high" : index === 1 ? "medium" : "low",
-  }));
-});
-
-const categoryRows = computed(() => {
+const riskCards = computed<RiskCard[]>(() => {
   const chunks = latestContractAssistant.value?.chunks ?? [];
   if (chunks.length === 0) {
     return [
-      { name: "責任限制", score: 0, tone: "high" },
-      { name: "智慧財產", score: 0, tone: "high" },
-      { name: "終止條款", score: 0, tone: "low" },
-      { name: "保密義務", score: 0, tone: "low" },
-      { name: "付款條件", score: 0, tone: "medium" },
+      {
+        id: "placeholder",
+        title: "等待分析結果",
+        summary: "送出審閱問題後，系統會在這裡整理重點風險與關鍵條文。",
+        severity: "low",
+        section: "Waiting for analysis",
+      },
     ];
   }
-  const chunkCount = chunks.length;
-  return [
-    { name: "責任限制", score: Math.min(100, 48 + chunkCount * 8), tone: "high" },
-    { name: "智慧財產", score: Math.min(100, 40 + chunkCount * 7), tone: "high" },
-    { name: "終止條款", score: Math.min(100, 34 + chunkCount * 6), tone: "low" },
-    { name: "保密義務", score: Math.min(100, 36 + chunkCount * 6), tone: "low" },
-    { name: "付款條件", score: Math.min(100, 32 + chunkCount * 6), tone: "medium" },
-  ];
+
+  return chunks.slice(0, 4).map((chunk, index) => ({
+    id: `${index}-${chunk.tag || "issue"}`,
+    title: chunk.tag || `風險項目 ${index + 1}`,
+    summary: chunk.text || "系統尚未提供摘要內容。",
+    severity: index === 0 ? "high" : index === 1 ? "medium" : "low",
+    section: `Section ${index + 1}`,
+  }));
 });
 
 const overallRiskScore = computed(() => {
-  const values = categoryRows.value.map((item) => item.score);
-  if (values.every((value) => value === 0)) {
+  const cards = riskCards.value.filter((item) => item.id !== "placeholder");
+  if (cards.length === 0) {
     return 0;
   }
-  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+  const total = cards.reduce((sum, card) => {
+    if (card.severity === "high") {
+      return sum + 84;
+    }
+    if (card.severity === "medium") {
+      return sum + 61;
+    }
+    return sum + 34;
+  }, 0);
+  return Math.round(total / cards.length);
 });
 
-function onMessageListScroll() {
-  const el = messageListEl.value;
+const complianceLabel = computed(() => {
+  if (overallRiskScore.value >= 75) {
+    return "High";
+  }
+  if (overallRiskScore.value >= 45) {
+    return "Medium";
+  }
+  return "Low";
+});
+
+const keyDates = computed(() => [
+  { label: "檔案名稱", value: currentDocumentTitle.value },
+  { label: "來源數量", value: `${sourceRows.value.length} 份` },
+  { label: "檢視頁次", value: pageLabel.value.replace("Page ", "") },
+]);
+
+const quickActions = [
+  { label: "Suggest Revision", prompt: "請依據目前內容提出修約建議。" },
+  { label: "Check Compliance", prompt: "請檢查這份合約的法遵風險。" },
+  { label: "Summarize Risks", prompt: "請整理這份合約的主要風險。" },
+  { label: "Export Report", prompt: "請整理成可以輸出的風險摘要報告。" },
+];
+
+function severityLabel(severity: RiskCard["severity"]): string {
+  if (severity === "high") {
+    return "High";
+  }
+  if (severity === "medium") {
+    return "Medium";
+  }
+  return "Low";
+}
+
+function onAssistantFeedScroll() {
+  const el = assistantFeedEl.value;
   if (!el) {
     return;
   }
   stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 }
 
-function scrollMessagesToBottom() {
-  const el = messageListEl.value;
+function scrollAssistantFeedToBottom() {
+  const el = assistantFeedEl.value;
   if (!el) {
     return;
   }
@@ -200,7 +243,7 @@ watch(
   async () => {
     await nextTick();
     if (stickToBottom.value) {
-      scrollMessagesToBottom();
+      scrollAssistantFeedToBottom();
     }
   },
 );
@@ -210,9 +253,7 @@ watch(
   async (id) => {
     scopeSyncState.value = "loading";
     const syncResult = await syncRagScopeFromSourcesForChat(id, { showLoading: false }).catch(() => null);
-    if (!syncResult) {
-      scopeSyncState.value = "error";
-    } else if (!syncResult.ok) {
+    if (!syncResult || !syncResult.ok) {
       scopeSyncState.value = "error";
     } else {
       scopeSyncState.value = syncResult.hasUploads ? "has" : "none";
@@ -221,14 +262,10 @@ watch(
     await loadPreview(id);
     stickToBottom.value = true;
     await nextTick();
-    scrollMessagesToBottom();
+    scrollAssistantFeedToBottom();
   },
   { immediate: true },
 );
-
-function dismissRetrievalHint() {
-  showRetrievalHint.value = false;
-}
 
 function goToPreviousPreviewPage() {
   if (!canGoToPreviousPreviewPage.value) {
@@ -242,6 +279,11 @@ function goToNextPreviewPage() {
     return;
   }
   currentPreviewPage.value += 1;
+}
+
+function setPrompt(prompt: string) {
+  railTab.value = "assistant";
+  input.value = prompt;
 }
 
 function onTextareaKeydown(event: KeyboardEvent) {
@@ -269,6 +311,7 @@ async function sendMessage() {
   input.value = "";
   sending.value = true;
   chatError.value = null;
+  railTab.value = "assistant";
 
   try {
     const body: ChatRequest = {
@@ -303,19 +346,6 @@ async function sendMessage() {
     sending.value = false;
   }
 }
-
-async function rerunLatestRequest() {
-  const messages = activeConversation.value?.messages ?? [];
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role === "user") {
-      input.value = message.content;
-      await nextTick();
-      void sendMessage();
-      return;
-    }
-  }
-}
 </script>
 
 <template>
@@ -327,55 +357,59 @@ async function rerunLatestRequest() {
 
     <section class="review-workspace">
       <div class="document-frame ds-card">
-        <header class="doc-toolbar">
-          <div class="doc-meta">
-            <h1 class="doc-title">{{ currentDocumentTitle }}</h1>
-            <span class="doc-status">待審閱</span>
+        <header class="viewer-toolbar">
+          <div class="viewer-toolbar__left">
+            <button type="button" class="viewer-icon" aria-label="縮小">-</button>
+            <span class="viewer-zoom">100%</span>
+            <button type="button" class="viewer-icon" aria-label="放大">+</button>
           </div>
-          <div class="doc-toolbar__right">
-            <button type="button" class="toolbar-pill" @click="settingsOpen = true">分析設定</button>
-            <span class="toolbar-pill toolbar-pill--plain">100%</span>
-            <div class="preview-pager">
-              <button
-                type="button"
-                class="toolbar-pill toolbar-pill--icon"
-                :disabled="!canGoToPreviousPreviewPage"
-                aria-label="上一頁"
-                @click="goToPreviousPreviewPage"
-              >
-                ←
-              </button>
-              <button
-                type="button"
-                class="toolbar-pill toolbar-pill--icon"
-                :disabled="!canGoToNextPreviewPage"
-                aria-label="下一頁"
-                @click="goToNextPreviewPage"
-              >
-                →
-              </button>
-            </div>
-            <span class="toolbar-page">{{ pageLabel }}</span>
+
+          <div class="viewer-toolbar__center">
+            <button
+              type="button"
+              class="viewer-icon"
+              :disabled="!canGoToPreviousPreviewPage"
+              aria-label="上一頁"
+              @click="goToPreviousPreviewPage"
+            >
+              &lt;
+            </button>
+            <span class="viewer-page">{{ pageLabel }}</span>
+            <button
+              type="button"
+              class="viewer-icon"
+              :disabled="!canGoToNextPreviewPage"
+              aria-label="下一頁"
+              @click="goToNextPreviewPage"
+            >
+              &gt;
+            </button>
+          </div>
+
+          <div class="viewer-toolbar__right">
+            <button type="button" class="viewer-icon viewer-icon--wide" aria-label="下載">Save</button>
           </div>
         </header>
 
         <div class="document-scroll">
           <div v-if="previewLoading" class="document-empty">
-            <p class="document-empty__eyebrow">預覽載入中</p>
-            <h2>正在整理文件內容</h2>
-            <p>系統會優先顯示原始文件的可讀預覽，而不是切片內容。</p>
+            <p class="document-empty__eyebrow">Document Preview</p>
+            <h2>正在載入文件內容</h2>
+            <p>系統正在整理最新索引結果，完成後會在這裡顯示可讀版面。</p>
           </div>
 
           <div v-else-if="previewParagraphs.length === 0" class="document-empty">
-            <p class="document-empty__eyebrow">審閱工作台已就緒</p>
-            <h2>目前還沒有合約預覽內容</h2>
-            <p>先上傳合約，再輸入想檢查的法律問題。中間區域會顯示文件預覽，不再顯示 chunk 切片。</p>
-            <p v-if="sourceRows.length > 0" class="document-empty__hint">
-              這個對話目前綁定 {{ sourceRows.length }} 個已索引來源。若不想沿用舊資料，請按左側「New」建立新對話。
-            </p>
+            <p class="document-empty__eyebrow">Workspace Ready</p>
+            <h2>上傳文件後即可開始審閱</h2>
+            <p>左側選擇已索引文件，中央會以閱讀版面顯示內容，右側則可查看風險評估與法律助理回覆。</p>
           </div>
 
           <article v-else class="document-paper">
+            <header class="paper-header">
+              <p class="paper-file">{{ currentDocumentTitle }}</p>
+              <p class="paper-meta">Document Preview</p>
+            </header>
+
             <section
               v-for="(paragraph, index) in activePreviewPageParagraphs"
               :key="`${index}-${paragraph.slice(0, 24)}`"
@@ -385,163 +419,135 @@ async function rerunLatestRequest() {
             </section>
           </article>
         </div>
-
-        <div class="workspace-bottom">
-          <div class="response-head">
-            <p class="response-head__title">分析回覆</p>
-            <p class="response-head__desc">你的提問與 AI 回覆會顯示在這裡。</p>
-          </div>
-
-          <div class="message-strip" ref="messageListEl" @scroll="onMessageListScroll">
-            <template v-for="(msg, idx) in activeConversation?.messages" :key="idx">
-              <div v-if="msg.role === 'user'" class="msg-row user">
-                <div class="user-bubble">{{ msg.content }}</div>
-              </div>
-              <div v-else-if="isAssistantMessage(msg)" class="msg-row assistant">
-                <ChatAssistantMessage :message="msg" />
-              </div>
-            </template>
-
-            <p v-if="sending" class="typing">正在分析中...</p>
-          </div>
-
-          <ApiErrorBlock
-            v-if="chatError"
-            :error="chatError"
-            title="分析請求失敗"
-          />
-
-          <div class="composer">
-            <div v-if="showRetrievalHint" class="composer-first-tip" role="status">
-              <p class="composer-first-tip-text">
-                可以直接指定檢查角度，例如責任上限、智慧財產歸屬、賠償條款、終止條件等。
-              </p>
-              <button
-                type="button"
-                class="composer-first-tip-dismiss"
-                @click="dismissRetrievalHint"
-              >
-                關閉
-              </button>
-            </div>
-
-            <div class="composer-row">
-              <textarea
-                id="chat-input"
-                v-model="input"
-                class="ds-textarea composer-input"
-                rows="4"
-                name="message"
-                aria-label="輸入分析問題"
-                placeholder="請輸入你要合約法遵助理檢查的條款、比較風險，或提出修訂建議。"
-                :disabled="sending"
-                autocomplete="off"
-                @keydown="onTextareaKeydown"
-              />
-              <button
-                type="button"
-                class="ds-btn ds-btn--primary composer-send"
-                :disabled="sending || !input.trim()"
-                @click="sendMessage()"
-              >
-                分析
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
 
-      <aside class="analysis-rail">
-        <div class="analysis-brand ds-card">
-          <div class="analysis-brand__icon" aria-hidden="true">✦</div>
-          <div>
-            <p class="analysis-brand__title">AI 分析</p>
-            <p class="analysis-brand__subtitle">由合約法遵助理驅動</p>
-          </div>
+      <aside class="analysis-rail ds-card">
+        <div class="rail-tabs">
           <button
             type="button"
-            class="rail-refresh"
-            @click="rerunLatestRequest"
-            :disabled="sending || !(activeConversation?.messages.length)"
+            class="rail-tab"
+            :class="{ 'rail-tab--active': railTab === 'risk' }"
+            @click="railTab = 'risk'"
           >
-            重新分析
+            Risk Report
+          </button>
+          <button
+            type="button"
+            class="rail-tab"
+            :class="{ 'rail-tab--active': railTab === 'assistant' }"
+            @click="railTab = 'assistant'"
+          >
+            Legal Assistant
           </button>
         </div>
 
-        <div class="analysis-card ds-card">
-          <div class="score-head">
-            <div>
-              <p class="score-label">整體風險分數</p>
-              <p class="score-caption">
-                {{ latestContractAssistant ? "依最新契約分析結果估算" : "尚未進入契約分析模式" }}
-              </p>
+        <div v-if="railTab === 'risk'" class="rail-panel">
+          <section class="score-card">
+            <p class="score-card__label">COMPLIANCE SCORE</p>
+            <div class="score-card__row">
+              <p class="score-card__value">{{ overallRiskScore }}<span>/100</span></p>
+              <span class="score-chip" :class="`score-chip--${complianceLabel.toLowerCase()}`">
+                {{ complianceLabel }}
+              </span>
             </div>
-            <p class="score-value">{{ overallRiskScore }}/100</p>
-          </div>
-          <div class="score-bar">
-            <div class="score-bar__fill" :style="{ width: `${overallRiskScore}%` }" />
-          </div>
-        </div>
+          </section>
 
-        <div class="analysis-card ds-card">
-          <div class="rail-section-head">
-            <p class="rail-title">分類風險</p>
-          </div>
-          <div class="category-list">
-            <div
-              v-for="item in categoryRows"
-              :key="item.name"
-              class="category-row"
-            >
-              <span class="category-name">{{ item.name }}</span>
-              <div class="category-track">
-                <div class="category-fill" :class="`tone-${item.tone}`" :style="{ width: `${item.score}%` }" />
-              </div>
-              <span class="category-score">{{ item.score }}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="analysis-card ds-card">
-          <div class="rail-section-head">
-            <p class="rail-title">已識別問題</p>
-            <span class="rail-count">{{ issueCards.length || "未啟用" }}</span>
-          </div>
-          <div v-if="issueCards.length === 0" class="issue-empty">
-            尚未開始契約分析。請先上傳文件並提出具體的契約風險問題。
-          </div>
-          <div v-else class="issue-list">
+          <section class="report-section">
+            <p class="report-section__title">KEY FINDINGS</p>
             <article
-              v-for="issue in issueCards"
-              :key="issue.id"
-              class="issue-card"
+              v-for="card in riskCards"
+              :key="card.id"
+              class="finding-card"
             >
-              <div class="issue-head">
-                <h3>{{ issue.title }}</h3>
-                <span class="severity" :class="`severity-${issue.severity}`">{{ issue.severity }}</span>
+              <div class="finding-card__head">
+                <h3>{{ card.title }}</h3>
+                <span class="finding-chip" :class="`finding-chip--${card.severity}`">
+                  {{ severityLabel(card.severity) }}
+                </span>
               </div>
-              <p class="issue-summary">{{ issue.summary }}</p>
+              <p class="finding-card__body">{{ card.summary }}</p>
+              <p class="finding-card__section">{{ card.section }}</p>
             </article>
-          </div>
+          </section>
+
+          <section class="report-section">
+            <p class="report-section__title">KEY DATES</p>
+            <div class="date-list">
+              <div
+                v-for="item in keyDates"
+                :key="item.label"
+                class="date-row"
+              >
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+          </section>
         </div>
 
-        <div class="analysis-card ds-card">
-          <div class="rail-section-head">
-            <p class="rail-title">已索引來源</p>
+        <div v-else class="rail-panel rail-panel--assistant">
+          <div ref="assistantFeedEl" class="assistant-feed" @scroll="onAssistantFeedScroll">
+            <p class="assistant-feed__label">Legal Assistant</p>
+
+            <div v-if="activeConversation?.messages.length" class="assistant-feed__messages">
+              <template v-for="(msg, index) in activeConversation?.messages" :key="index">
+                <div v-if="msg.role === 'user'" class="assistant-user">{{ msg.content }}</div>
+                <div v-else-if="isAssistantMessage(msg)" class="assistant-reply">
+                  <ChatAssistantMessage :message="msg" />
+                </div>
+              </template>
+            </div>
+            <div v-else class="assistant-empty">
+              送出審閱問題後，法律助理會在這裡整理條文重點、修約方向與引用來源。
+            </div>
+
+            <ApiErrorBlock
+              v-if="chatError"
+              :error="chatError"
+              title="訊息送出失敗"
+            />
           </div>
-          <div v-if="sourceRows.length === 0" class="issue-empty">
-            目前沒有可用的來源文件。
-          </div>
-          <ul v-else class="source-list">
-            <li
-              v-for="row in sourceRows"
-              :key="row.source"
-              class="source-item"
+
+          <div class="assistant-actions">
+            <button
+              v-for="item in quickActions"
+              :key="item.label"
+              type="button"
+              class="assistant-action"
+              @click="setPrompt(item.prompt)"
             >
-              <p class="source-title">{{ row.source }}</p>
-              <p class="source-meta">{{ row.chunk_count }} 個 chunk</p>
-            </li>
-          </ul>
+              {{ item.label }}
+            </button>
+          </div>
+
+          <div class="assistant-focus">
+            <p class="assistant-focus__label">Focusing on</p>
+            <p class="assistant-focus__value">{{ riskCards[0]?.section ?? "Waiting for analysis" }}</p>
+            <p class="assistant-focus__hint">{{ riskCards[0]?.title ?? "尚未產生風險摘要" }}</p>
+          </div>
+
+          <div class="assistant-composer">
+            <textarea
+              id="chat-input"
+              v-model="input"
+              class="ds-textarea assistant-composer__input"
+              rows="3"
+              name="message"
+              aria-label="Ask about this document"
+              placeholder="Ask about this document..."
+              :disabled="sending"
+              autocomplete="off"
+              @keydown="onTextareaKeydown"
+            />
+            <button
+              type="button"
+              class="assistant-composer__send"
+              :disabled="sending || !input.trim()"
+              @click="sendMessage()"
+            >
+              Go
+            </button>
+          </div>
         </div>
       </aside>
     </section>
@@ -550,582 +556,478 @@ async function rerunLatestRequest() {
 
 <style scoped>
 .workspace-page {
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .review-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 348px;
-  gap: 16px;
-  max-width: none;
-  margin: 0;
-  min-height: 100%;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  height: 100%;
+  min-height: 0;
 }
 
 .document-frame {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  height: calc(100vh - 16px);
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
   overflow: hidden;
   border: 1px solid #dbe6f2;
-  background: #eef4fb;
-  border-radius: 12px;
-  box-shadow: none;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, #edf3fb 0%, #eaf1f8 100%);
 }
 
-.doc-toolbar {
-  display: flex;
+.viewer-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.92);
   border-bottom: 1px solid #dbe6f2;
-  background: #fffdf9;
-  padding: 10px 14px;
 }
 
-.doc-meta {
+.viewer-toolbar__left,
+.viewer-toolbar__center,
+.viewer-toolbar__right {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  gap: 12px;
 }
 
-.doc-title {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: #0e2c4a;
+.viewer-toolbar__center {
+  justify-content: center;
 }
 
-.doc-status {
-  border-radius: 999px;
-  background: #ffe6a9;
-  padding: 4px 10px;
-  font-size: 0.92rem;
-  font-weight: 700;
-  color: #8a5b00;
-}
-
-.doc-toolbar__right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+.viewer-toolbar__right {
   justify-content: flex-end;
 }
 
-.toolbar-pill {
-  border: 1px solid #d4dfed;
+.viewer-icon {
+  min-width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: #ffffff;
-  padding: 8px 12px;
-  font-size: 0.98rem;
-  font-weight: 700;
-  color: #27496a;
-}
-
-.toolbar-pill--plain {
-  min-width: 56px;
-  text-align: center;
-}
-
-.toolbar-pill--icon {
-  min-width: 38px;
-  padding: 8px 0;
-}
-
-.toolbar-pill:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.preview-pager {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.toolbar-page {
-  font-size: 0.98rem;
-  font-weight: 700;
+  background: transparent;
   color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.viewer-icon--wide {
+  min-width: 58px;
+  border-radius: 10px;
+}
+
+.viewer-icon:hover:not(:disabled) {
+  border-color: #d7e2ee;
+  background: #f8fbff;
+}
+
+.viewer-icon:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.viewer-zoom,
+.viewer-page {
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: #475569;
 }
 
 .document-scroll {
-  flex: none;
   min-height: 0;
-  max-height: none;
   overflow: auto;
-  padding: 12px 12px 8px;
+  padding: 22px 22px 26px;
 }
 
 .document-paper {
+  width: min(100%, 780px);
+  min-height: 1080px;
   margin: 0 auto;
-  max-width: 780px;
-  min-height: clamp(520px, 74vh, 940px);
-  border: 1px solid #e3ebf4;
+  padding: 44px 72px 68px;
   background: #ffffff;
-  border-radius: 8px;
-  box-shadow: none;
-  padding: 26px 28px;
+  border: 1px solid #e6edf5;
+  box-shadow:
+    0 24px 48px rgba(15, 23, 42, 0.08),
+    0 3px 10px rgba(15, 23, 42, 0.04);
+}
+
+.paper-header {
+  margin-bottom: 26px;
+}
+
+.paper-file {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 800;
+  color: #cad5e3;
+}
+
+.paper-meta {
+  margin: 18px 0 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #b6c3d4;
 }
 
 .paper-section + .paper-section {
-  margin-top: 14px;
+  margin-top: 18px;
 }
 
 .paper-body {
   margin: 0;
   white-space: pre-wrap;
-  font-size: 1.22rem;
-  line-height: 1.72;
-  color: #243b53;
+  font-size: 1.05rem;
+  line-height: 1.8;
+  color: #29405c;
 }
 
 .document-empty {
-  margin: 24px auto 0;
+  margin: 20px auto 0;
   max-width: 760px;
   border: 1px solid #e3ebf4;
+  border-radius: 16px;
   background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
-  padding: 28px 32px;
+  padding: 30px 32px;
   text-align: center;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+.document-empty__eyebrow {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #64748b;
 }
 
 .document-empty h2 {
   margin: 8px 0 12px;
-  font-size: 3rem;
+  font-size: 2rem;
   color: #102a43;
 }
 
 .document-empty p {
   margin: 0;
-  font-size: 1.45rem;
+  font-size: 1rem;
   line-height: 1.8;
   color: #486581;
 }
 
-.document-empty__eyebrow {
-  font-size: 1.2rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: #486581;
-  text-transform: uppercase;
-}
-
-.document-empty__hint {
-  margin-top: 16px;
-  color: #0f5fa8;
-  font-weight: 700;
-}
-
-.workspace-bottom {
-  flex: none;
-  border-top: 1px solid #dbe6f2;
-  background: #ffffff;
-  padding: 12px 14px 14px;
-}
-
-.response-head {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.response-head__title {
-  margin: 0;
-  font-size: 1.45rem;
-  font-weight: 800;
-  color: #102a43;
-}
-
-.response-head__desc {
-  margin: 0;
-  font-size: 1.05rem;
-  color: #829ab1;
-}
-
-.message-strip {
-  max-height: 132px;
-  overflow: auto;
-  border: 1px solid #dbe6f2;
-  border-radius: 12px;
-  background: #f8fbff;
-  padding: 10px;
-  margin-bottom: 10px;
-}
-
-.msg-row + .msg-row {
-  margin-top: 10px;
-}
-
-.msg-row.user {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.msg-row.assistant {
-  display: flex;
-  justify-content: flex-start;
-}
-
-.user-bubble {
-  max-width: min(520px, 100%);
-  border-radius: 12px;
-  background: linear-gradient(180deg, #2f8eff 0%, #1f74ea 100%);
-  padding: 10px 14px;
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: #ffffff;
-}
-
-.typing {
-  margin: 12px 0 0;
-  font-size: 1.35rem;
-  color: #486581;
-  font-weight: 700;
-}
-
-.composer {
-  margin-top: 0;
-  padding-top: 12px;
-  border-top: 1px solid #edf2f7;
-}
-
-.composer-first-tip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-  border: 1px solid #c9def7;
-  border-radius: 10px;
-  background: #edf5ff;
-  padding: 10px 12px;
-}
-
-.composer-first-tip-text {
-  margin: 0;
-  font-size: 1.35rem;
-  color: #365b84;
-}
-
-.composer-first-tip-dismiss {
-  border: 0;
-  background: transparent;
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: #1f74ea;
-}
-
-.composer-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 118px;
-  gap: 10px;
-  align-items: end;
-}
-
-.composer-input {
-  min-height: 72px;
-  resize: vertical;
-}
-
-.composer-send {
-  min-height: 44px;
-}
-
 .analysis-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding-top: 0;
-  align-self: stretch;
-}
-
-.analysis-brand,
-.analysis-card {
-  border: 1px solid #dbe6f2;
-  background: #ffffff;
-}
-
-.analysis-brand {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  padding: 14px;
-  box-shadow: none;
-}
-
-.analysis-brand__icon {
-  display: grid;
-  height: 44px;
-  width: 44px;
-  place-items: center;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #184f94 0%, #1f74ea 100%);
-  color: #ffffff;
-  font-size: 1.8rem;
-}
-
-.analysis-brand__title,
-.rail-title,
-.score-label {
-  margin: 0;
-  font-size: 1.62rem;
-  font-weight: 800;
-  color: #102a43;
-}
-
-.analysis-brand__subtitle,
-.score-caption {
-  margin: 4px 0 0;
-  font-size: 1.05rem;
-  color: #829ab1;
-}
-
-.rail-refresh {
-  border: 1px solid #d4dfed;
-  border-radius: 14px;
-  background: #ffffff;
-  padding: 9px 14px;
-  font-size: 1rem;
-  font-weight: 700;
-  color: #27496a;
-}
-
-.analysis-card {
-  padding: 14px;
-  box-shadow: none;
-}
-
-.score-head,
-.rail-section-head {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.score-value {
-  margin: 0;
-  font-size: 2.45rem;
-  font-weight: 900;
-  color: #d59000;
-}
-
-.score-bar,
-.category-track {
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
   overflow: hidden;
-  border-radius: 999px;
-  background: #e8eef6;
+  padding: 0;
+  border: 1px solid #dbe6f2;
+  border-radius: 16px;
+  background: #ffffff;
 }
 
-.score-bar {
-  height: 10px;
-  margin-top: 14px;
-}
-
-.score-bar__fill,
-.category-fill {
-  height: 100%;
-  border-radius: inherit;
-}
-
-.score-bar__fill {
-  background: linear-gradient(90deg, #1f74ea 0%, #2f8eff 100%);
-}
-
-.category-list {
-  margin-top: 10px;
-}
-
-.category-row {
+.rail-tabs {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) 30px;
-  gap: 12px;
-  align-items: center;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid #dbe6f2;
 }
 
-.category-row + .category-row {
-  margin-top: 8px;
+.rail-tab {
+  border: none;
+  background: #ffffff;
+  padding: 14px 10px;
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
 }
 
-.category-name,
-.category-score,
-.source-meta {
-  font-size: 1rem;
-  color: #627d98;
+.rail-tab--active {
+  color: #102a43;
+  box-shadow: inset 0 -3px 0 #102a43;
 }
 
-.tone-high {
-  background: #f56565;
+.rail-panel {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 14px 18px;
 }
 
-.tone-medium {
-  background: #e6a700;
-}
-
-.tone-low {
-  background: #31b35c;
-}
-
-.issue-empty {
-  margin-top: 12px;
-  font-size: 1.3rem;
-  line-height: 1.7;
-  color: #627d98;
-}
-
-.issue-list {
-  margin-top: 12px;
-}
-
-.issue-card {
+.score-card {
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #f8fbff;
-  padding: 12px;
+  border-radius: 14px;
+  background: #fbfdff;
+  padding: 16px;
 }
 
-.issue-card + .issue-card {
-  margin-top: 10px;
+.score-card__label,
+.report-section__title,
+.assistant-feed__label,
+.assistant-focus__label {
+  margin: 0 0 12px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: #7c8da3;
 }
 
-.issue-head {
+.score-card__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
-.issue-head h3,
-.source-title {
+.score-card__value {
   margin: 0;
-  font-size: 1.32rem;
-  font-weight: 800;
+  font-size: 2.7rem;
+  font-weight: 900;
+  line-height: 1;
   color: #102a43;
-  word-break: break-word;
 }
 
-.issue-summary {
-  margin: 10px 0 0;
-  font-size: 1.3rem;
-  line-height: 1.7;
-  color: #486581;
+.score-card__value span {
+  font-size: 1.5rem;
+  color: #94a3b8;
 }
 
-.severity,
-.rail-count {
+.score-chip,
+.finding-chip {
   border-radius: 999px;
   padding: 4px 10px;
-  font-size: 1.1rem;
+  font-size: 0.78rem;
   font-weight: 800;
 }
 
-.severity-high {
+.score-chip--high,
+.finding-chip--high {
   background: #fde8e8;
   color: #d64545;
 }
 
-.severity-medium {
+.score-chip--medium,
+.finding-chip--medium {
   background: #fff3d6;
   color: #b7791f;
 }
 
-.severity-low,
-.rail-count {
-  background: #edf2f7;
-  color: #627d98;
+.score-chip--low,
+.finding-chip--low {
+  background: #e8f8ee;
+  color: #2f9e5f;
 }
 
-.source-list {
+.report-section {
+  margin-top: 20px;
+}
+
+.finding-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.finding-card + .finding-card {
+  margin-top: 12px;
+}
+
+.finding-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.finding-card__head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #102a43;
+}
+
+.finding-card__body {
+  margin: 10px 0 0;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: #52657d;
+}
+
+.finding-card__section {
   margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #94a3b8;
 }
 
-.source-item + .source-item {
-  margin-top: 10px;
-  padding-top: 12px;
-  border-top: 1px solid #edf2f7;
+.date-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.message-strip :deep(.assistant-msg) {
-  width: 100%;
+.date-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.92rem;
+  color: #64748b;
 }
 
-.message-strip :deep(.bubble),
-.message-strip :deep(.bubble--segmented),
-.message-strip :deep(.bubble-part),
-.message-strip :deep(.risk-clause),
-.message-strip :deep(.markdown-body) {
-  background: transparent;
-  color: #243b53;
-  box-shadow: none;
+.date-row strong {
+  max-width: 56%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #102a43;
 }
 
-.message-strip :deep(.bubble),
-.message-strip :deep(.bubble--segmented) {
+.rail-panel--assistant {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto auto;
+  gap: 14px;
+}
+
+.assistant-feed {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.assistant-feed__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assistant-user {
+  align-self: flex-end;
+  max-width: 100%;
+  border-radius: 12px;
+  background: #eff6ff;
+  padding: 10px 12px;
+  font-size: 0.94rem;
+  line-height: 1.6;
+  color: #1e3a5f;
+}
+
+.assistant-reply :deep(.bubble),
+.assistant-reply :deep(.bubble--segmented) {
+  max-width: 100%;
+  border-radius: 12px;
+}
+
+.assistant-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  padding: 14px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+.assistant-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.assistant-action {
+  border: 1px solid #d7e2ee;
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #52657d;
+  cursor: pointer;
+}
+
+.assistant-focus {
   border: 1px solid #dbe6f2;
   border-radius: 12px;
-  background: #ffffff;
+  background: #f8fbff;
   padding: 12px 14px;
 }
 
-.message-strip :deep(pre) {
-  overflow: auto;
-  border-radius: 12px;
-  background: #f4f7fb;
-  padding: 12px;
+.assistant-focus__label {
+  margin-bottom: 6px;
+}
+
+.assistant-focus__value {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #102a43;
+}
+
+.assistant-focus__hint {
+  margin: 6px 0 0;
+  font-size: 0.88rem;
+  color: #7c8da3;
+}
+
+.assistant-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  gap: 10px;
+  align-items: end;
+}
+
+.assistant-composer__input {
+  min-height: 82px;
+}
+
+.assistant-composer__send {
+  height: 48px;
+  border: none;
+  border-radius: 14px;
+  background: #94a3b8;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.assistant-composer__send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 @media (max-width: 1200px) {
   .review-workspace {
     grid-template-columns: 1fr;
-    gap: 18px;
   }
 
   .analysis-rail {
-    order: 2;
-    padding-top: 0;
+    min-height: 720px;
   }
 }
 
 @media (max-width: 720px) {
-  .doc-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .doc-meta {
-    flex-wrap: wrap;
-  }
-
-  .response-head {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .composer-row {
+  .viewer-toolbar {
     grid-template-columns: 1fr;
   }
 
-  .document-scroll {
-    padding: 16px 12px 14px;
+  .viewer-toolbar__left,
+  .viewer-toolbar__center,
+  .viewer-toolbar__right {
+    justify-content: center;
   }
 
-  .document-paper,
-  .document-empty {
-    padding: 22px 18px;
+  .document-paper {
+    min-height: auto;
+    padding: 30px 22px 44px;
   }
 
-  .workspace-bottom {
-    padding: 12px;
+  .assistant-actions {
+    grid-template-columns: 1fr;
   }
 }
 </style>
