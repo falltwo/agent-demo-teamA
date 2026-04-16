@@ -13,6 +13,79 @@ from typing import Any, Tuple
 
 from dotenv import load_dotenv
 
+_STAGE_MODEL_ENV_MAP: dict[str, tuple[str, ...]] = {
+    "router": ("CHAT_ROUTER_MODEL", "OLLAMA_ROUTER_MODEL"),
+    "rag_rewrite": ("CHAT_RAG_REWRITE_MODEL", "OLLAMA_RAG_REWRITE_MODEL"),
+    "rag_aux_query": ("CHAT_RAG_AUX_QUERY_MODEL", "OLLAMA_RAG_AUX_QUERY_MODEL"),
+    "rag_rerank": ("CHAT_RAG_RERANK_MODEL", "OLLAMA_RAG_RERANK_MODEL"),
+    "rag_package": ("CHAT_RAG_PACKAGE_MODEL", "OLLAMA_RAG_PACKAGE_MODEL"),
+    "rag_generate": ("CHAT_RAG_GENERATE_MODEL", "OLLAMA_RAG_GENERATE_MODEL"),
+    "rag_summary": ("CHAT_RAG_SUMMARY_MODEL", "OLLAMA_RAG_SUMMARY_MODEL"),
+    "small_talk": ("CHAT_SMALL_TALK_MODEL", "OLLAMA_SMALL_TALK_MODEL"),
+    "analysis": ("CHAT_ANALYSIS_MODEL", "OLLAMA_ANALYSIS_MODEL"),
+    "research_generate": ("CHAT_RESEARCH_GENERATE_MODEL", "OLLAMA_RESEARCH_GENERATE_MODEL"),
+    "contract_risk_generate": ("CHAT_CONTRACT_RISK_GENERATE_MODEL", "OLLAMA_CONTRACT_RISK_GENERATE_MODEL"),
+    "contract_risk_verify": ("CHAT_CONTRACT_RISK_VERIFY_MODEL", "OLLAMA_CONTRACT_RISK_VERIFY_MODEL"),
+}
+
+_STAGE_TIMEOUT_ENV_MAP: dict[str, tuple[str, ...]] = {
+    "router": ("CHAT_ROUTER_TIMEOUT_SEC", "OLLAMA_ROUTER_TIMEOUT_SEC"),
+    "rag_rewrite": ("CHAT_RAG_REWRITE_TIMEOUT_SEC", "OLLAMA_RAG_REWRITE_TIMEOUT_SEC"),
+    "rag_aux_query": ("CHAT_RAG_AUX_QUERY_TIMEOUT_SEC", "OLLAMA_RAG_AUX_QUERY_TIMEOUT_SEC"),
+    "rag_rerank": ("CHAT_RAG_RERANK_TIMEOUT_SEC", "OLLAMA_RAG_RERANK_TIMEOUT_SEC"),
+    "rag_package": ("CHAT_RAG_PACKAGE_TIMEOUT_SEC", "OLLAMA_RAG_PACKAGE_TIMEOUT_SEC"),
+    "rag_generate": ("CHAT_RAG_GENERATE_TIMEOUT_SEC", "OLLAMA_RAG_GENERATE_TIMEOUT_SEC"),
+    "analysis": ("CHAT_ANALYSIS_TIMEOUT_SEC", "OLLAMA_ANALYSIS_TIMEOUT_SEC"),
+    "research_generate": ("CHAT_RESEARCH_GENERATE_TIMEOUT_SEC", "OLLAMA_RESEARCH_GENERATE_TIMEOUT_SEC"),
+    "contract_risk_generate": ("CHAT_CONTRACT_RISK_GENERATE_TIMEOUT_SEC", "OLLAMA_CONTRACT_RISK_GENERATE_TIMEOUT_SEC"),
+    "contract_risk_verify": ("CHAT_CONTRACT_RISK_VERIFY_TIMEOUT_SEC", "OLLAMA_CONTRACT_RISK_VERIFY_TIMEOUT_SEC"),
+    "small_talk": ("CHAT_SMALL_TALK_TIMEOUT_SEC", "OLLAMA_SMALL_TALK_TIMEOUT_SEC"),
+}
+
+
+def _chat_provider() -> str:
+    return (os.getenv("CHAT_PROVIDER", "") or "").strip().lower()
+
+
+def _default_model_for_provider(chat_provider: str) -> str:
+    if chat_provider in ("ollama", "local"):
+        return (os.getenv("OLLAMA_CHAT_MODEL", "gemma3:27b") or "gemma3:27b").strip()
+    use_groq = os.getenv("EVAL_USE_GROQ", "").strip().lower() in ("1", "true", "yes")
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if use_groq and groq_key:
+        return (os.getenv("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile") or "llama-3.3-70b-versatile").strip()
+    return (os.getenv("GEMINI_CHAT_MODEL", "gemini-3.1-flash-lite-preview") or "gemini-3.1-flash-lite-preview").strip()
+
+
+def get_model_for_stage(stage: str, default_model: str | None = None) -> str:
+    """Resolve stage-specific model override, then fall back to default model."""
+    load_dotenv()
+    chat_provider = _chat_provider()
+    base_model = (default_model or _default_model_for_provider(chat_provider)).strip()
+    env_keys = _STAGE_MODEL_ENV_MAP.get(stage, ())
+    for key in env_keys:
+        candidate = (os.getenv(key, "") or "").strip()
+        if candidate:
+            return candidate
+    return base_model
+
+
+def get_timeout_for_stage(stage: str, default_timeout_sec: float | None = None) -> float | None:
+    """Resolve stage-specific timeout override in seconds."""
+    load_dotenv()
+    env_keys = _STAGE_TIMEOUT_ENV_MAP.get(stage, ())
+    for key in env_keys:
+        raw = (os.getenv(key, "") or "").strip()
+        if not raw:
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if value > 0:
+            return value
+    return default_timeout_sec
+
 
 class _TextResponse:
     """Minimal response object compatible with Gemini usage sites."""
@@ -115,6 +188,7 @@ class OllamaAdapter:
     ):
         from openai import OpenAI
 
+        self._supports_request_timeout = True
         self._client = OpenAI(
             base_url=_normalize_ollama_base_url(base_url),
             api_key=api_key,
@@ -166,6 +240,15 @@ class OllamaAdapter:
             if response_mime_type == "application/json":
                 req["response_format"] = {"type": "json_object"}
 
+        request_timeout_sec = kwargs.get("request_timeout_sec")
+        if request_timeout_sec is not None:
+            try:
+                timeout_value = float(request_timeout_sec)
+            except (TypeError, ValueError):
+                timeout_value = None
+            if timeout_value and timeout_value > 0:
+                req["timeout"] = timeout_value
+
         resp = self._client.chat.completions.create(**req)
         text = ""
         if resp.choices:
@@ -212,4 +295,3 @@ def get_chat_client_and_model() -> Tuple[Any, str]:
     model = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.1-flash-lite-preview")
     client = genai.Client(api_key=google_api_key)
     return client, model
-

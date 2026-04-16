@@ -18,6 +18,7 @@ from google.genai import types
 from langgraph.graph import END, StateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
+from llm_client import get_model_for_stage, get_timeout_for_stage
 from rag_common import (
     build_bm25_index,
     bm25_search,
@@ -49,6 +50,16 @@ class RAGState(_RAGStateRequired, total=False):
 
 # 生成回答時只取最近 N 輪對話，避免過長歷史吃滿 context 並維持「記得上下文」效果
 MAX_HISTORY_TURNS = int(os.getenv("RAG_MAX_HISTORY_TURNS", "12"))
+
+
+def _timeout_kwargs(client: Any, stage: str) -> dict[str, Any]:
+    """Only Ollama adapter supports per-request timeout in this codebase."""
+    timeout_sec = get_timeout_for_stage(stage)
+    if not timeout_sec:
+        return {}
+    if getattr(client, "_supports_request_timeout", False):
+        return {"request_timeout_sec": timeout_sec}
+    return {}
 
 
 def _build_history_blocks(history: list[dict[str, Any]], max_turns: int | None = None) -> str:
@@ -113,6 +124,7 @@ def _generate_auxiliary_queries(
             model=llm_model,
             contents=prompt,
             config=types.GenerateContentConfig(system_instruction=_AUX_QUERIES_SYSTEM),
+            **_timeout_kwargs(chat_client, "rag_aux_query"),
         )
         text = (out.text or "").strip()
         # 嘗試解析 JSON 陣列
@@ -285,6 +297,7 @@ def _rerank_with_llm(
         model=llm_model,
         contents=prompt,
         config=types.GenerateContentConfig(system_instruction=system),
+        **_timeout_kwargs(client, "rag_rerank"),
     )
     text = (out.text or "").strip()
 
@@ -340,6 +353,7 @@ def _rewrite_query_for_retrieval(
             model=llm_model,
             contents=prompt,
             config=types.GenerateContentConfig(system_instruction=_QUERY_REWRITE_SYSTEM),
+            **_timeout_kwargs(chat_client, "rag_rewrite"),
         )
         rewritten = (out.text or "").strip()
         return rewritten if rewritten else (question or "").strip()
@@ -354,6 +368,19 @@ def _build_graph():
         return _GRAPH
 
     chat_client, embed_client, index, index_dim, llm_model, embed_model, index_name = _init_clients_and_index()
+    rag_rewrite_model = get_model_for_stage("rag_rewrite", llm_model)
+    rag_aux_query_model = get_model_for_stage("rag_aux_query", rag_rewrite_model)
+    rag_rerank_model = get_model_for_stage("rag_rerank", rag_rewrite_model)
+    rag_package_model = get_model_for_stage("rag_package", llm_model)
+    rag_generate_model = get_model_for_stage("rag_generate", llm_model)
+    logger.info(
+        "rag_graph model profile: rewrite=%s aux_query=%s rerank=%s package=%s generate=%s",
+        rag_rewrite_model,
+        rag_aux_query_model,
+        rag_rerank_model,
+        rag_package_model,
+        rag_generate_model,
+    )
 
     def retrieve(state: RAGState) -> RAGState:
         t0 = time.perf_counter()
@@ -367,7 +394,7 @@ def _build_graph():
             query_for_embed = question
             if os.getenv("RAG_USE_HISTORY_FOR_QUERY", "").strip().lower() in ("1", "true", "yes") and history:
                 query_for_embed = _rewrite_query_for_retrieval(
-                    chat_client, llm_model, question, history
+                    chat_client, rag_rewrite_model, question, history
                 )
 
             internal_top_k = max(top_k, int(os.getenv("RAG_INTERNAL_TOP_K", "20")))
@@ -389,7 +416,7 @@ def _build_graph():
 
             if use_multi_query and query_for_embed.strip():
                 aux_queries = _generate_auxiliary_queries(
-                    chat_client, llm_model, query_for_embed, max_queries=aux_max
+                    chat_client, rag_aux_query_model, query_for_embed, max_queries=aux_max
                 )
                 for aux_q in aux_queries:
                     if not aux_q:
@@ -470,7 +497,7 @@ def _build_graph():
             else:
                 best_matches = _rerank_with_llm(
                     chat_client,
-                    llm_model,
+                    rag_rerank_model,
                     question,
                     filtered_matches,
                     top_n=rerank_top_n,
@@ -525,9 +552,10 @@ def _build_graph():
             prompt = f"## 問題\n{question}\n\n## 檢索內容\n{context}"
         try:
             out = chat_client.models.generate_content(
-                model=llm_model,
+                model=rag_package_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(system_instruction=_INVESTIGATOR_SYSTEM),
+                **_timeout_kwargs(chat_client, "rag_package"),
             )
             packaged_context = (out.text or "").strip() or context
         except Exception as e:
@@ -582,9 +610,10 @@ def _build_graph():
             prompt = f"## 問題\n{question}\n\n## 檢索專家提供的脈絡（原始條文脈絡與知識庫參考依據）\n{packaged_context}"
 
         out = chat_client.models.generate_content(
-            model=llm_model,
+            model=rag_generate_model,
             contents=prompt,
             config=types.GenerateContentConfig(system_instruction=system),
+            **_timeout_kwargs(chat_client, "rag_generate"),
         )
         answer = (out.text or "").strip()
         logger.info("rag_graph node=generate duration_sec=%.3f outcome=ok", time.perf_counter() - t0)
@@ -676,6 +705,7 @@ def retrieve_only(
     chat_id：若設定，只檢索該對話上傳的 chunks。
     """
     chat_client, embed_client, index, index_dim, llm_model, embed_model, _index_name = _init_clients_and_index()
+    rag_rerank_model = get_model_for_stage("rag_rerank", llm_model)
     qvec = _embed_query_common(
         embed_client,
         question,
@@ -737,7 +767,7 @@ def retrieve_only(
     else:
         best_matches = _rerank_with_llm(
             chat_client,
-            llm_model,
+            rag_rerank_model,
             question,
             filtered_matches,
             top_n=rerank_top_n,
@@ -776,6 +806,7 @@ def summarize_source(
         return "未指定來源（source 為空）。"
     source = source.strip()
     chat_client, embed_client, index, index_dim, llm_model, embed_model, _index_name = _init_clients_and_index()
+    rag_summary_model = get_model_for_stage("rag_summary", llm_model)
     # 用 source 名稱當查詢向量，搭配 metadata filter 只取該來源的 chunks
     qvec = _embed_query_common(
         embed_client,
@@ -817,9 +848,10 @@ def summarize_source(
     )
     prompt = f"## 來源\n{source}\n\n## 內容\n{full_text}\n\n請產出上述來源的摘要："
     out = chat_client.models.generate_content(
-        model=llm_model,
+        model=rag_summary_model,
         contents=prompt,
         config=types.GenerateContentConfig(system_instruction=system),
+        **_timeout_kwargs(chat_client, "rag_summary"),
     )
     return (out.text or "").strip() or "無法產生摘要。"
 

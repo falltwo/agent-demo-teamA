@@ -46,13 +46,13 @@
 
 使用者提問後，系統會先做意圖判斷，再路由到對應工具或專家流程，最後回傳答案、引用與風險說明。
 
-![系統流程](assets/flowchart.png)
+![使用者快速流程（30 秒版）](assets/flowchart-user-v2.svg)
 
 ### 架構圖
 
 核心模組包含前端介面、Agent Router、RAG 檢索、法條查詢、文件灌入與 Eval 驗證。
 
-![系統架構](assets/architecture-diagram.png)
+![分層架構（工程視角）](assets/architecture-user-v2.svg)
 
 ## 快速開始
 
@@ -103,6 +103,37 @@ CHAT_PROVIDER=ollama
 OLLAMA_CHAT_MODEL=gemma3:27b
 EMBEDDING_PROVIDER=ollama
 OLLAMA_EMBED_MODEL=snowflake-arctic-embed2:568m
+```
+
+多模型分流已內建在後端，使用者不需要在前端手動選模型。你只要在 `.env` 設定分流規則即可：
+
+```env
+# 低成本階段（路由 / query rewrite / rerank）用小模型
+OLLAMA_ROUTER_MODEL=gemma3:4b-it-qat
+OLLAMA_RAG_REWRITE_MODEL=gemma3:4b-it-qat
+OLLAMA_RAG_RERANK_MODEL=gemma3:4b-it-qat
+
+# 主回答階段用中模型
+OLLAMA_RAG_GENERATE_MODEL=gemma3:27b
+
+# 合約高品質覆核可選大模型（非預設聊天路徑）
+OLLAMA_CONTRACT_RISK_VERIFY_MODEL=gpt-oss:120b
+```
+
+`timeout` 可以調低，而且建議按階段分開設定，避免「整段長時間沒回應」：
+
+```env
+OLLAMA_TIMEOUT_SEC=120
+OLLAMA_ROUTER_TIMEOUT_SEC=20
+OLLAMA_RAG_REWRITE_TIMEOUT_SEC=20
+OLLAMA_RAG_RERANK_TIMEOUT_SEC=25
+OLLAMA_RAG_GENERATE_TIMEOUT_SEC=120
+```
+
+若你要優先速度，建議再啟用本地 MMR（避免 LLM rerank 額外一輪）：
+
+```env
+RAG_MMR_LAMBDA=0.6
 ```
 
 ### 3. 安裝依賴

@@ -20,6 +20,7 @@ from expert_agents import (
 )
 from echarts_tools import create_chart_option
 from firecrawl_tools import scrape_url, search_and_scrape
+from llm_client import get_model_for_stage, get_timeout_for_stage
 from rag_graph import retrieve_only, run_rag, search_similar, summarize_source
 from sources_registry import list_sources
 
@@ -47,6 +48,15 @@ SUPPORTED_TOOLS = frozenset({
     "tw_law_web_search",
     "contract_risk_with_law_search",
 })
+
+
+def _timeout_kwargs(client: Any, stage: str) -> dict[str, Any]:
+    timeout_sec = get_timeout_for_stage(stage)
+    if not timeout_sec:
+        return {}
+    if getattr(client, "_supports_request_timeout", False):
+        return {"request_timeout_sec": timeout_sec}
+    return {}
 
 
 def _extract_url_from_text(text: str) -> str | None:
@@ -188,6 +198,7 @@ def firecrawl_intent_with_llm(question: str) -> Tuple[str, Dict[str, Any]] | Non
     if os.getenv("FIRECRAWL_USE_LLM_GATE", "").strip().lower() not in ("1", "true", "yes"):
         return None
     client, model = _init_llm_client()
+    router_model = get_model_for_stage("router", model)
     url = _extract_url_from_text(question)
     system = (
         "你只負責判斷：使用者是否要「擷取網頁內容」或「搜尋網路並擷取內容」？\n"
@@ -199,9 +210,10 @@ def firecrawl_intent_with_llm(question: str) -> Tuple[str, Dict[str, Any]] | Non
     prompt = f"使用者說：{question}\n\n請輸出上述 JSON："
     try:
         out = client.models.generate_content(
-            model=model,
+            model=router_model,
             contents=prompt,
             config=types.GenerateContentConfig(system_instruction=system),
+            **_timeout_kwargs(client, "router"),
         )
         text = (out.text or "").strip()
         data = json.loads(text)
@@ -381,10 +393,13 @@ def _contract_risk_with_law_search_impl(
         prompt = f"## 問題\n{question}\n\n{combined_context}\n\n請依上述指示產出風險評估："
 
     client, model = _init_llm_client()
+    contract_generate_model = get_model_for_stage("contract_risk_generate", model)
+    contract_verify_model = get_model_for_stage("contract_risk_verify", contract_generate_model)
     out = client.models.generate_content(
-        model=model,
+        model=contract_generate_model,
         contents=prompt,
         config=types.GenerateContentConfig(system_instruction=system),
+        **_timeout_kwargs(client, "contract_risk_generate"),
     )
     answer = (out.text or "").strip()
 
@@ -409,9 +424,10 @@ def _contract_risk_with_law_search_impl(
             + "\n\n請依指示產出上述自檢結果："
         )
         verify_out = client.models.generate_content(
-            model=model,
+            model=contract_verify_model,
             contents=verify_prompt,
             config=types.GenerateContentConfig(system_instruction=verify_system),
+            **_timeout_kwargs(client, "contract_risk_verify"),
         )
         verify_text = (verify_out.text or "").strip()
         if verify_text:
@@ -486,6 +502,7 @@ def _analyze_and_chart(
     """從知識庫檢索財報/文件內容，用 LLM 分析可視化項目；若 generate_chart=True 再產出一張圖。
     回傳 (answer_text, chart_option/asked_chart_confirmation 或 None)。"""
     context, sources, chunks, _ = retrieve_only(question=question, top_k=top_k, chat_id=chat_id)
+    analysis_model = get_model_for_stage("analysis", model)
     if not context or context.strip() == "(無檢索內容)" or not chunks:
         return "知識庫中找不到與「財報」或「資料」相關的內容，請先灌入文件（例如 data 裡的財報）或改用 list_sources 查看有哪些來源。", None
 
@@ -505,9 +522,10 @@ def _analyze_and_chart(
     prompt = f"## 使用者問題\n{question}\n\n## 檢索內容\n{context}\n\n請依指示輸出 analysis_summary 與圖表資料的 JSON："
     try:
         out = client.models.generate_content(
-            model=model,
+            model=analysis_model,
             contents=prompt,
             config=types.GenerateContentConfig(system_instruction=system),
+            **_timeout_kwargs(client, "analysis"),
         )
         text = (out.text or "").strip()
         # 去掉可能的 markdown 代碼塊
@@ -649,6 +667,7 @@ def _decide_tool(
         model=model,
         contents=prompt,
         config=types.GenerateContentConfig(system_instruction=system),
+        **_timeout_kwargs(client, "router"),
     )
     text = (out.text or "").strip()
 
@@ -787,7 +806,8 @@ def route_and_answer(
             tool, tool_args = intent
     if tool is None:
         client, llm_model = _init_llm_client()
-        tool, tool_args = _decide_tool(client, llm_model, question, history)
+        router_model = get_model_for_stage("router", llm_model)
+        tool, tool_args = _decide_tool(client, router_model, question, history)
 
     if tool == "ask_web_vs_rag":
         # 意圖模糊：追問使用者要從知識庫還是網路擷取；由呼叫端（Streamlit）記住 original_question，下一輪傳回
@@ -940,9 +960,10 @@ def route_and_answer(
             parts.append("\n## 網路搜尋結果\n" + context_web)
         prompt = "\n".join(parts) + "\n\n請整合以上內容回答問題，並標註來源（知識庫 vs 網路）："
         out = client.models.generate_content(
-            model=llm_model,
+            model=get_model_for_stage("research_generate", llm_model),
             contents=prompt,
             config=types.GenerateContentConfig(system_instruction=system),
+            **_timeout_kwargs(client, "research_generate"),
         )
         answer = (out.text or "").strip()
         return answer, sources_rag, chunks_rag, "research", None
@@ -1054,9 +1075,10 @@ def route_and_answer(
         prompt = f"## 問題\n{question}"
 
     out = client.models.generate_content(
-        model=llm_model,
+        model=get_model_for_stage("small_talk", llm_model),
         contents=prompt,
         config=types.GenerateContentConfig(system_instruction=system),
+        **_timeout_kwargs(client, "small_talk"),
     )
     answer = (out.text or "").strip()
     return answer, [], [], "small_talk", None
