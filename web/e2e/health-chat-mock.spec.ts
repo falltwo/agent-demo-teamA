@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-test.describe("契約／E2E（選修）", () => {
-  test("後端 /health 可連線", async ({ request }) => {
+test.describe("契約 E2E", () => {
+  test("後端 /health 可用", async ({ request }) => {
     const res = await request.get("http://127.0.0.1:8000/health");
     expect(res.ok()).toBeTruthy();
     const body = (await res.json()) as { status?: string };
@@ -27,8 +27,8 @@ test.describe("契約／E2E（選修）", () => {
     });
 
     await page.goto("/chat");
-    await page.getByLabel("輸入訊息").fill("你好");
-    await page.getByRole("button", { name: "送出" }).click();
+    await page.getByLabel(/輸入(訊息|分析問題)/).fill("你好");
+    await page.getByRole("button", { name: /^(送出|分析)$/ }).click();
     await expect(page.getByText("契約測試 mock 回覆")).toBeVisible();
   });
 });
