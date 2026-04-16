@@ -18,11 +18,7 @@ from google.genai import types
 from pinecone import Pinecone
 
 
-def _normalize_ollama_base_url(base_url: str) -> str:
-    base = (base_url or "http://127.0.0.1:11434").rstrip("/")
-    if not base.endswith("/v1"):
-        base = f"{base}/v1"
-    return base
+from llm_client import _normalize_ollama_base_url
 
 
 class _EmbeddingItem:

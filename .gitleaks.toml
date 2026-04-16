@@ -1,0 +1,20 @@
+[allowlist]
+  description = "Known test/example/placeholder values that are not real secrets"
+  regexes = [
+    "fake",
+    "test-secret",
+    "REPLACE_WITH_",
+    "example\\.com",
+    "your[_-]",
+    "placeholder",
+    "pcsk_test",
+    "tvly-dev-test",
+  ]
+
+  paths = [
+    ".env.example",
+    ".env.frontend.example",
+    ".env.admin.example",
+    "tests/",
+    "eval/eval_set",
+  ]

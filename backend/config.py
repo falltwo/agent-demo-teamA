@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # 預設僅記憶體處理；若設為路徑，未來可將超大檔 spill 至此並於完成後刪除
     ingest_temp_dir: str | None = Field(default=None, validation_alias="INGEST_TEMP_DIR")
 
+    # Admin API 保護用 Bearer token；若未設定則不驗證（向後相容）
+    admin_api_token: str | None = Field(
+        default=None,
+        validation_alias="ADMIN_API_TOKEN",
+        description="若設定，/api/v1/admin/* 端點須以 Bearer token 認證",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

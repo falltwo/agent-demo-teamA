@@ -96,9 +96,10 @@ class _TextResponse:
 
 def _normalize_ollama_base_url(base_url: str) -> str:
     base = (base_url or "http://127.0.0.1:11434").rstrip("/")
-    if not base.endswith("/v1"):
-        base = f"{base}/v1"
-    return base
+    # 統一剝掉末尾 /v1（若已有），再加回，防止 /v1/v1 重複
+    if base.endswith("/v1"):
+        base = base[:-3].rstrip("/")
+    return f"{base}/v1"
 
 
 def _extract_text_from_openai_message_content(content: Any) -> str:

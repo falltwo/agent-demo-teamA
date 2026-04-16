@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from backend.api.deps import AdminAuthDep
 from backend.schemas.admin import (
     DockerContainersResponse,
     OllamaModelsResponse,
@@ -15,12 +16,12 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 
 @router.get("/services", response_model=ServicesStatusResponse)
-def get_services_status() -> ServicesStatusResponse:
+def get_services_status(_auth: AdminAuthDep) -> ServicesStatusResponse:
     return ServicesStatusResponse(services=admin_service.list_services_status())
 
 
 @router.post("/services/restart", response_model=ServicesRestartResponse)
-def post_restart_services(body: ServicesRestartRequest) -> ServicesRestartResponse:
+def post_restart_services(body: ServicesRestartRequest, _auth: AdminAuthDep) -> ServicesRestartResponse:
     requested = body.services or list(admin_service.DEFAULT_RESTART_SERVICES)
     requested = [x.strip() for x in requested if x and x.strip()]
     if not requested:
@@ -43,10 +44,10 @@ def post_restart_services(body: ServicesRestartRequest) -> ServicesRestartRespon
 
 
 @router.get("/ollama/models", response_model=OllamaModelsResponse)
-def get_ollama_models() -> OllamaModelsResponse:
+def get_ollama_models(_auth: AdminAuthDep) -> OllamaModelsResponse:
     return admin_service.list_ollama_models()
 
 
 @router.get("/docker/containers", response_model=DockerContainersResponse)
-def get_docker_containers() -> DockerContainersResponse:
+def get_docker_containers(_auth: AdminAuthDep) -> DockerContainersResponse:
     return admin_service.list_docker_containers()

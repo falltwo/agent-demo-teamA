@@ -53,9 +53,14 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# ---------- 前端環境設定（含 IP，不入版控） ----------
+web/.env.frontend
+web/.env.admin
+
 # ---------- 專案文件 ----------
 # 預設忽略 docs 下其他臨時文件，但保留已納入版本控管的摘要文件
 docs/*
 !docs/README.md
 !docs/update-summary-2026-04-15.md
+!docs/update-summary-2026-04-17.md
 !docs/DGX_網站使用與維運手冊_v1.2.md

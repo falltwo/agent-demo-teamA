@@ -11,7 +11,7 @@ WEB_ADMIN_SERVICE="${WEB_ADMIN_SERVICE:-contract-agent-web-admin.service}"
 WEB_FRONT_PORT="${WEB_FRONT_PORT:-4173}"
 WEB_ADMIN_PORT="${WEB_ADMIN_PORT:-4174}"
 UV_ENV_FILE="${UV_ENV_FILE:-$HOME/.local/bin/env}"
-HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
+HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-60}"
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -41,6 +41,23 @@ cd "${PROJECT_DIR}"
 git pull --ff-only origin "${BRANCH}"
 uv sync
 
+# ── 動態產生前端 env 檔（Tailscale IP 優先，否則 LAN IP）
+# 需在 npm build 前執行，讓 Vite 能 inline 正確的 API URL
+_lan_ip="$(hostname -I | awk '{print $1}')"
+_tailscale_ip=""
+if command -v tailscale >/dev/null 2>&1; then
+  _tailscale_ip="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
+fi
+_api_ip="${_tailscale_ip:-${_lan_ip}}"
+
+printf 'VITE_APP_TARGET=frontend\nVITE_API_BASE_URL=http://%s:%s\n' \
+  "${_api_ip}" "${API_PORT}" > "${PROJECT_DIR}/web/.env.frontend"
+printf 'VITE_APP_TARGET=admin\nVITE_API_BASE_URL=http://%s:%s\n' \
+  "${_api_ip}" "${API_PORT}" > "${PROJECT_DIR}/web/.env.admin"
+
+echo "Generated web/.env.frontend  → http://${_api_ip}:${API_PORT}"
+echo "Generated web/.env.admin     → http://${_api_ip}:${API_PORT}"
+
 cd "${PROJECT_DIR}/web"
 npm ci
 npm run build
@@ -49,28 +66,25 @@ cd "${PROJECT_DIR}"
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart "${API_SERVICE}" "${WEB_FRONT_SERVICE}" "${WEB_ADMIN_SERVICE}"
 
+# ── 健康檢查：等待 API 就緒（單次請求有 --max-time 保護；接受 ok 或 degraded）
 health_url="http://127.0.0.1:${API_PORT}/health"
 deadline=$((SECONDS + HEALTH_TIMEOUT_SEC))
-until curl -fsS "${health_url}" >/dev/null; do
+until curl -fsS --max-time 5 "${health_url}" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('status') in ('ok','degraded') else 1)" \
+  2>/dev/null; do
   if (( SECONDS >= deadline )); then
     echo "API health check timeout after ${HEALTH_TIMEOUT_SEC}s: ${health_url}" >&2
     exit 1
   fi
-  sleep 1
+  sleep 2
 done
 
-lan_ip="$(hostname -I | awk '{print $1}')"
-tailscale_ip=""
-if command -v tailscale >/dev/null 2>&1; then
-  tailscale_ip="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
-fi
-
 echo "Deployment complete."
-echo "Frontend (LAN):       http://${lan_ip}:${WEB_FRONT_PORT}"
-echo "Admin (LAN):          http://${lan_ip}:${WEB_ADMIN_PORT}"
-echo "API health (LAN):     http://${lan_ip}:${API_PORT}/health"
-if [[ -n "${tailscale_ip}" ]]; then
-  echo "Frontend (Tailscale): http://${tailscale_ip}:${WEB_FRONT_PORT}"
-  echo "Admin (Tailscale):    http://${tailscale_ip}:${WEB_ADMIN_PORT}"
-  echo "API health (Tail):    http://${tailscale_ip}:${API_PORT}/health"
+echo "Frontend (LAN):       http://${_lan_ip}:${WEB_FRONT_PORT}"
+echo "Admin (LAN):          http://${_lan_ip}:${WEB_ADMIN_PORT}"
+echo "API health (LAN):     http://${_lan_ip}:${API_PORT}/health"
+if [[ -n "${_tailscale_ip}" ]]; then
+  echo "Frontend (Tailscale): http://${_tailscale_ip}:${WEB_FRONT_PORT}"
+  echo "Admin (Tailscale):    http://${_tailscale_ip}:${WEB_ADMIN_PORT}"
+  echo "API health (Tail):    http://${_tailscale_ip}:${API_PORT}/health"
 fi

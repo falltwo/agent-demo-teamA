@@ -138,7 +138,7 @@ def _generate_auxiliary_queries(
         queries = [str(q).strip() for q in arr if q and str(q).strip()][:max_queries]
         return queries
     except Exception as e:
-        logger.warning("Auxiliary queries generation failed: %s", e)
+        logger.warning("Auxiliary queries generation failed: %s", e, exc_info=True)
         return []
 
 
@@ -358,7 +358,7 @@ def _rewrite_query_for_retrieval(
         rewritten = (out.text or "").strip()
         return rewritten if rewritten else (question or "").strip()
     except Exception as e:
-        logger.warning("Query rewrite failed, using original question: %s", e)
+        logger.warning("Query rewrite failed, using original question: %s", e, exc_info=True)
         return (question or "").strip()
 
 
@@ -435,7 +435,7 @@ def _build_graph():
                                 seen_keys.add(k)
                                 raw_matches.append(m)
                     except Exception as e:
-                        logger.warning("Auxiliary query failed for %r: %s", aux_q, e)
+                        logger.warning("Auxiliary query failed for %r: %s", aux_q, e, exc_info=True)
                 merge_cap = int(os.getenv("RAG_MERGE_CAP", str(2 * internal_top_k)))
                 if len(raw_matches) > merge_cap:
                     raw_matches = sorted(
@@ -559,7 +559,7 @@ def _build_graph():
             )
             packaged_context = (out.text or "").strip() or context
         except Exception as e:
-            logger.warning("Investigator package failed, pass through context: %s", e)
+            logger.warning("Investigator package failed, pass through context: %s", e, exc_info=True)
             packaged_context = context
         logger.info("rag_graph node=package duration_sec=%.3f outcome=ok", time.perf_counter() - t0)
         return {

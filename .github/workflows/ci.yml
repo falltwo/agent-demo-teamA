@@ -6,6 +6,17 @@ on:
   pull_request:
 
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   pytest:
     runs-on: ubuntu-latest
     steps:
@@ -69,7 +80,7 @@ jobs:
   deploy:
     name: Deploy to DGX
     runs-on: ubuntu-latest
-    needs: [pytest, web, playwright]
+    needs: [secret-scan, pytest, web, playwright]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     concurrency:
       group: deploy-dgx
