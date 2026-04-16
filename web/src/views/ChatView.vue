@@ -530,6 +530,7 @@ async function sendMessage() {
             <textarea
               id="chat-input"
               v-model="input"
+              data-testid="chat-input"
               class="ds-textarea assistant-composer__input"
               rows="3"
               name="message"
@@ -541,6 +542,7 @@ async function sendMessage() {
             />
             <button
               type="button"
+              data-testid="chat-send"
               class="assistant-composer__send"
               :disabled="sending || !input.trim()"
               @click="sendMessage()"

@@ -1,20 +1,20 @@
 import { expect, test } from "@playwright/test";
 
-test.describe("契約 E2E", () => {
-  test("後端 /health 可用", async ({ request }) => {
+test.describe("health + chat mock E2E", () => {
+  test("/health returns ok", async ({ request }) => {
     const res = await request.get("http://127.0.0.1:8000/health");
     expect(res.ok()).toBeTruthy();
     const body = (await res.json()) as { status?: string };
     expect(body.status).toBe("ok");
   });
 
-  test("對話頁：mock POST /api/v1/chat 回覆可顯示", async ({ page }) => {
+  test("chat page renders mock POST /api/v1/chat response", async ({ page }) => {
     await page.route("**/api/v1/chat", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          answer: "契約測試 mock 回覆",
+          answer: "mock answer visible",
           sources: [],
           chunks: [],
           tool_name: "rag_search",
@@ -27,8 +27,9 @@ test.describe("契約 E2E", () => {
     });
 
     await page.goto("/chat");
-    await page.getByLabel(/輸入(訊息|分析問題)/).fill("你好");
-    await page.getByRole("button", { name: /^(送出|分析)$/ }).click();
-    await expect(page.getByText("契約測試 mock 回覆")).toBeVisible();
+    await page.getByRole("button", { name: "Legal Assistant" }).click();
+    await page.getByTestId("chat-input").fill("hello");
+    await page.getByTestId("chat-send").click();
+    await expect(page.getByText("mock answer visible")).toBeVisible();
   });
 });
