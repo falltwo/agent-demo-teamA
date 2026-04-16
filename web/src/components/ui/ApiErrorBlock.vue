@@ -52,7 +52,7 @@ function formatDetails(d: unknown): string {
 <template>
   <div class="api-err" role="alert">
     <p class="api-err-title">
-      {{ title ?? "請求失敗" }}
+      {{ title ?? "發生錯誤" }}
       <span v-if="parsed.status" class="api-err-status">HTTP {{ parsed.status }}</span>
     </p>
     <p class="api-err-line">
@@ -60,7 +60,7 @@ function formatDetails(d: unknown): string {
       {{ parsed.message }}
     </p>
     <details v-if="parsed.details != null" class="api-err-details">
-      <summary>error.details</summary>
+      <summary>錯誤細節</summary>
       <pre class="api-err-pre">{{ formatDetails(parsed.details) }}</pre>
     </details>
   </div>

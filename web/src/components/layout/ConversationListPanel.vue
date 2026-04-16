@@ -11,16 +11,14 @@ const editingId = ref<string | null>(null);
 const draftTitle = ref("");
 
 watch(editingId, async (id) => {
-  if (id) {
-    const c = conversation.conversations[id];
-    draftTitle.value = c?.title ?? "";
-    await nextTick();
-    const el = document.querySelector(
-      ".conv-panel .conv-input-rename",
-    ) as HTMLInputElement | null;
-    el?.focus();
-    el?.select();
+  if (!id) {
+    return;
   }
+  draftTitle.value = conversation.conversations[id]?.title ?? "";
+  await nextTick();
+  const el = document.querySelector(".conv-panel .conv-input-rename") as HTMLInputElement | null;
+  el?.focus();
+  el?.select();
 });
 
 function selectConv(id: string) {
@@ -30,16 +28,9 @@ function selectConv(id: string) {
   }
 }
 
-function onNewChat() {
-  conversation.addConversation();
-  void router.push("/chat");
-}
-
 function startRename(id: string, e: Event) {
   e.stopPropagation();
   editingId.value = id;
-  const c = conversation.conversations[id];
-  draftTitle.value = c?.title ?? "";
 }
 
 function commitRename() {
@@ -67,9 +58,7 @@ function onRenameKeydown(e: KeyboardEvent) {
 
 function confirmDelete(id: string, title: string, e: Event) {
   e.stopPropagation();
-  const ok = window.confirm(
-    `確定要刪除「${title}」嗎？此對話訊息將自本機清除，不會刪除向量庫資料。`,
-  );
+  const ok = window.confirm(`Delete "${title}" from recent?`);
   if (!ok) {
     return;
   }
@@ -78,40 +67,30 @@ function confirmDelete(id: string, title: string, e: Event) {
     editingId.value = null;
   }
 }
+
+function formatUpdatedAt(value: number): string {
+  return new Intl.DateTimeFormat("zh-TW", {
+    month: "numeric",
+    day: "numeric",
+  }).format(value);
+}
 </script>
 
 <template>
-  <section
-    class="conv-panel"
-    aria-label="對話列表"
-  >
-    <p class="conv-panel-title">
-      對話
-    </p>
-    <button
-      type="button"
-      class="new-chat-btn"
-      @click="onNewChat"
-    >
-      ＋ 新對話
-    </button>
+  <section class="conv-panel" aria-label="Recent documents">
     <ul class="conv-list">
       <li
         v-for="id in conversation.conversationIdsByRecency"
         :key="id"
         class="conv-item-wrap"
       >
-        <div
-          v-if="editingId === id"
-          class="conv-edit"
-          @click.stop
-        >
+        <div v-if="editingId === id" class="conv-edit" @click.stop>
           <input
             v-model="draftTitle"
             type="text"
             class="conv-input conv-input-rename"
             maxlength="120"
-            :aria-label="`重新命名：${conversation.conversations[id]?.title}`"
+            aria-label="Rename recent document"
             @keydown="onRenameKeydown"
             @blur="commitRename"
           >
@@ -119,26 +98,24 @@ function confirmDelete(id: string, title: string, e: Event) {
         <div
           v-else
           class="conv-row"
-          :class="{
-            active: conversation.activeConversationId === id,
-          }"
+          :class="{ active: conversation.activeConversationId === id }"
           role="button"
           tabindex="0"
           @click="selectConv(id)"
           @keydown.enter.prevent="selectConv(id)"
           @keydown.space.prevent="selectConv(id)"
         >
+          <div class="doc-icon" aria-hidden="true">▥</div>
           <div class="conv-main">
-            <span class="conv-title">{{
-              conversation.conversations[id]?.title || "新對話"
-            }}</span>
+            <span class="conv-title">{{ conversation.conversations[id]?.title || "新對話" }}</span>
+            <span class="conv-meta">{{ formatUpdatedAt(conversation.conversations[id]?.updatedAt ?? Date.now()) }}</span>
           </div>
           <div class="conv-actions">
             <button
               type="button"
               class="icon-btn"
-              title="重新命名"
-              aria-label="重新命名"
+              title="Rename"
+              aria-label="Rename"
               @click="startRename(id, $event)"
             >
               ✎
@@ -146,8 +123,8 @@ function confirmDelete(id: string, title: string, e: Event) {
             <button
               type="button"
               class="icon-btn danger"
-              title="刪除對話"
-              aria-label="刪除對話"
+              title="Delete"
+              aria-label="Delete"
               @click="confirmDelete(id, conversation.conversations[id]?.title ?? '', $event)"
             >
               ×
@@ -161,79 +138,39 @@ function confirmDelete(id: string, title: string, e: Event) {
 
 <style scoped>
 .conv-panel {
-  margin-bottom: var(--space-3);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.conv-panel-title {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-caption-size);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-
-.new-chat-btn {
-  width: 100%;
-  margin-bottom: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  font-family: var(--font-body);
-  font-size: var(--text-body-sm-size);
-  font-weight: 600;
-  color: var(--color-accent);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  text-align: left;
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease;
-}
-
-.new-chat-btn:hover {
-  background: var(--color-accent-muted);
-}
-
-.new-chat-btn:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+  min-height: 0;
 }
 
 .conv-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: min(40vh, 320px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(26vh, 220px);
   overflow-y: auto;
-}
-
-.conv-item-wrap + .conv-item-wrap {
-  margin-top: var(--space-1);
 }
 
 .conv-row {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-1);
-  padding: var(--space-2);
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px 12px;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(89, 170, 255, 0.18);
   cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease;
-}
-
-.conv-row:hover {
-  background: var(--color-bg-muted);
+  color: rgba(220, 232, 245, 0.92);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .conv-row.active {
-  background: var(--color-accent-muted);
-  border-color: var(--color-border-subtle);
+  background: rgba(17, 107, 214, 0.24);
+  border-color: rgba(90, 171, 255, 0.3);
+}
+
+.conv-row:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .conv-row:focus-visible {
@@ -241,23 +178,40 @@ function confirmDelete(id: string, title: string, e: Event) {
   outline-offset: 2px;
 }
 
+.doc-icon {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.9rem;
+}
+
 .conv-main {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .conv-title {
-  font-size: var(--text-body-sm-size);
-  font-weight: 600;
-  color: var(--color-text-primary);
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: white;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.conv-meta {
+  font-size: 0.72rem;
+  color: rgba(220, 232, 245, 0.54);
+}
+
 .conv-actions {
   display: flex;
-  flex-shrink: 0;
   gap: 2px;
 }
 
@@ -265,55 +219,39 @@ function confirmDelete(id: string, title: string, e: Event) {
   width: 1.75rem;
   height: 1.75rem;
   padding: 0;
-  font-size: 1rem;
-  line-height: 1;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 0.55rem;
   background: transparent;
-  color: var(--color-text-muted);
+  color: rgba(220, 232, 245, 0.5);
   cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
 }
 
 .icon-btn:hover {
-  background: var(--color-bg-surface);
-  color: var(--color-accent);
-}
-
-.icon-btn:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
 }
 
 .icon-btn.danger:hover {
-  color: var(--color-danger);
+  color: #ff9f9f;
 }
 
 .conv-edit {
-  padding: var(--space-1);
+  padding: 4px 0;
 }
 
 .conv-input {
   width: 100%;
   box-sizing: border-box;
-  padding: var(--space-1) var(--space-2);
-  font-family: var(--font-body);
-  font-size: var(--text-body-sm-size);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-elevated);
+  padding: 10px 12px;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(120, 177, 240, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  font: inherit;
 }
 
-.conv-input:focus {
+.conv-input:focus-visible {
   outline: var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-@media (max-width: 720px) {
-  .conv-list {
-    max-height: 200px;
-  }
+  outline-offset: 2px;
 }
 </style>

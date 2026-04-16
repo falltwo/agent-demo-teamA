@@ -68,6 +68,16 @@ function isErrorBody(data: unknown): data is ApiErrorBody {
 function toApiError(error: AxiosError): ApiError {
   const status = error.response?.status;
   const data = error.response?.data;
+  if (error.code === "ECONNABORTED" || /timeout/i.test(error.message || "")) {
+    return new ApiError(
+      {
+        code: "REQUEST_TIMEOUT",
+        message: "分析請求逾時，可能卡住了。請重新分析，或縮小問題範圍後再試一次。",
+        details: data,
+      },
+      status,
+    );
+  }
   if (isErrorBody(data)) {
     return new ApiError(data.error, status);
   }

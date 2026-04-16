@@ -7,6 +7,7 @@ export async function postChat(
 ): Promise<ChatResponse> {
   const { data } = await apiClient.post<ChatResponse>("/api/v1/chat", body, {
     showLoading: options?.showLoading,
+    timeout: 45000,
   });
   return data;
 }

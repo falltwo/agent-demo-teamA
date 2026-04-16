@@ -149,31 +149,16 @@ def tw_law_intent(question: str) -> Tuple[str, Dict[str, Any]] | None:
 
 
 def contract_risk_with_law_intent(question: str) -> Tuple[str, Dict[str, Any]] | None:
-    """使用者要「審閱合約」或合約／契約＋風險／法條時，走「合約＋法條查詢」整合流程（RAG ＋ 抽法條 ＋ Tavily 查司法院）。"""
+    """只有在使用者明確要求「查法條／法律／司法院」時，才走合約＋法條查詢流程。"""
     if not question or not question.strip():
         return None
     q = question.strip()
-    # 審閱＋合約／契約
-    if "審閱" in q and ("合約" in q or "契約" in q):
+    contract_terms = ("合約", "契約", "契約書", "租賃契約", "採購", "標案")
+    law_terms = ("法條", "法律", "條文", "民法", "消保法", "消費者保護法", "政府採購法", "條例", "司法院")
+    law_action_terms = ("查", "查詢", "依據", "引用", "比對", "對照")
+    if any(term in q for term in contract_terms) and any(term in q for term in law_terms):
         return ("contract_risk_with_law_search", {})
-    # 合約／契約 ＋ 風險／法條／法律／條文 等（含「這份合約有什麼風險」）
-    if ("合約" in q or "契約" in q) and (
-        "風險" in q or "法條" in q or "法律" in q or "條文" in q or "民法" in q or "消保法" in q or "司法院" in q or "條例" in q
-    ):
-        return ("contract_risk_with_law_search", {})
-    # 採購＋契約／合約／風險／審閱／法條
-    if "採購" in q and ("契約" in q or "合約" in q or "風險" in q or "審閱" in q or "法條" in q):
-        return ("contract_risk_with_law_search", {})
-    # 標案＋風險／審閱／條款
-    if "標案" in q and ("風險" in q or "審閱" in q or "條款" in q):
-        return ("contract_risk_with_law_search", {})
-    # 「對我方不利的條款」等
-    if ("不利" in q or "不利於" in q) and ("條款" in q or "契約" in q or "合約" in q):
-        return ("contract_risk_with_law_search", {})
-    # 合約／契約／租賃 ＋ 分析／檢查／評估／看看 等也走完整流程
-    if any(term in q for term in ("合約", "契約", "契約書", "租賃契約")) and any(
-        k in q for k in ("分析", "檢查", "評估", "看看", "幫我看", "審閱", "風險", "法條", "法律")
-    ):
+    if any(term in q for term in contract_terms) and "法規" in q and any(term in q for term in law_action_terms):
         return ("contract_risk_with_law_search", {})
     return None
 

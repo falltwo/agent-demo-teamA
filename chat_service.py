@@ -1,12 +1,39 @@
 """與 Streamlit／FastAPI 共用的 Agent 問答入口：薄封裝 `agent_router.route_and_answer`，並可選寫入 Eval 日誌。"""
 from __future__ import annotations
 
+import logging
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any
 
 from agent_router import route_and_answer
 from eval_log import is_enabled as eval_log_enabled
 from eval_log import log_run as eval_log_run
+
+logger = logging.getLogger(__name__)
+
+
+def _route_and_answer_with_timeout(
+    **kwargs: Any,
+) -> tuple[str, list[str], list[dict[str, Any]], str, dict[str, Any] | None]:
+    timeout_sec = float(os.getenv("CHAT_ROUTE_TIMEOUT_SEC", "40").strip() or "40")
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(route_and_answer, **kwargs)
+    try:
+        return future.result(timeout=timeout_sec)
+    except FuturesTimeoutError:
+        future.cancel()
+        logger.warning("route_and_answer timed out after %.1fs", timeout_sec)
+        return (
+            "後端分析逾時，可能是法條查詢、外部搜尋或模型回應卡住。請重新分析，或改用較小範圍的問題再試一次。",
+            [],
+            [],
+            "backend_timeout",
+            {"timed_out": True, "timeout_sec": timeout_sec},
+        )
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def answer_with_rag(
@@ -23,7 +50,7 @@ def answer_with_rag(
     chart_confirmation_reply: str | None = None,
 ) -> tuple[str, list[str], list[dict[str, Any]], str, dict[str, Any] | None]:
     """走總管 Agent，回傳 (answer, sources, chunks, tool_name, extra)。"""
-    answer, sources, chunks, tool_name, extra = route_and_answer(
+    answer, sources, chunks, tool_name, extra = _route_and_answer_with_timeout(
         question=question,
         top_k=top_k,
         history=history or [],

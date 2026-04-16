@@ -84,6 +84,10 @@
   --color-link-hover: var(--color-accent-hover);
 }
 
+html {
+  font-size: 14px;
+}
+
 body {
   margin: 0;
 }
