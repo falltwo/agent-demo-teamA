@@ -5,7 +5,8 @@ test.describe("health + chat mock E2E", () => {
     const res = await request.get("http://127.0.0.1:8000/health");
     expect(res.ok()).toBeTruthy();
     const body = (await res.json()) as { status?: string };
-    expect(body.status).toBe("ok");
+    // "degraded" 表示 API 本身運作，但某些依賴（Ollama/Pinecone）不可達（如 CI 環境）
+    expect(["ok", "degraded"]).toContain(body.status);
   });
 
   test("chat page renders mock POST /api/v1/chat response", async ({ page }) => {
