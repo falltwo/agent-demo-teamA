@@ -113,4 +113,4 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o BatchMode=yes \
             ${{ secrets.DGX_SSH_USER }}@${{ secrets.DGX_TAILSCALE_IP }} \
-            "bash --login /home/falltwo/Code_space/Contract-compliance-agent/scripts/deploy_contract_agent.sh"
+            "cd /home/falltwo/Code_space/Contract-compliance-agent && git fetch origin main && git reset --hard origin/main && bash --login scripts/deploy_contract_agent.sh"
