@@ -38,7 +38,8 @@ fi
 source "${UV_ENV_FILE}"
 
 cd "${PROJECT_DIR}"
-git pull --ff-only origin "${BRANCH}"
+git fetch origin "${BRANCH}"
+git reset --hard "origin/${BRANCH}"
 uv sync
 
 # ── 動態產生前端 env 檔（Tailscale IP 優先，否則 LAN IP）
