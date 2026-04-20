@@ -22,8 +22,34 @@ const props = defineProps<{
   message: AssistantConversationMessage;
 }>();
 
+/**
+ * 比對中文法規名稱 + 條號（含可選項/款）。
+ * 例：民法第188條、政府採購法第50條第1項、勞動基準法第84條之1
+ */
+const LAW_REF_RE =
+  /[\u4e00-\u9fff]{2,12}(?:法|條例|規則|辦法|細則)第\d+條(?:之\d+)?(?:第\d+[項款])?/g;
+
+/**
+ * 將 HTML 字串中的法條引用包成可點擊的全國法規資料庫連結。
+ * 已在 <a> 標籤內的文字不會重複處理。
+ */
+function linkLawRefs(html: string): string {
+  // 以現有 <a>...</a> 為界分割，奇數索引塊已是連結，直接保留
+  const chunks = html.split(/(<a\b[^>]*>[\s\S]*?<\/a>)/gi);
+  return chunks
+    .map((chunk, idx) => {
+      if (idx % 2 === 1) return chunk;
+      return chunk.replace(LAW_REF_RE, (match) => {
+        const url = `https://law.moj.gov.tw/LawClass/LawSearchAll.aspx?kw=${encodeURIComponent(match)}`;
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="law-ref-link">${match}</a>`;
+      });
+    })
+    .join("");
+}
+
 function mdToHtml(src: string): string {
-  return marked(src, { async: false }) as string;
+  const html = marked(src, { async: false }) as string;
+  return linkLawRefs(html);
 }
 
 const split = computed(() => splitAnswerAndRefs(props.message.content));
@@ -509,6 +535,21 @@ function onDetailToggle(e: Event, key: keyof typeof detailOpen) {
 }
 
 .source-link:hover {
+  color: var(--color-text-primary);
+}
+
+/* 法條自動連結 */
+.markdown-body :deep(.law-ref-link) {
+  color: var(--color-accent);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  font-weight: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.markdown-body :deep(.law-ref-link:hover) {
+  text-decoration: underline solid;
   color: var(--color-text-primary);
 }
 
