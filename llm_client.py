@@ -13,6 +13,11 @@ from typing import Any, Tuple
 
 from dotenv import load_dotenv
 
+# 模組載入時 load 一次即可；後續 os.getenv 直接讀 process env。
+# 保持此處而非 backend/main.py：Streamlit / eval CLI 也會 import 本模組，須確保環境變數載入。
+# load_dotenv 預設不覆蓋已存在的 env，對已 export 的環境無副作用。
+load_dotenv()
+
 _STAGE_MODEL_ENV_MAP: dict[str, tuple[str, ...]] = {
     "router": ("CHAT_ROUTER_MODEL", "OLLAMA_ROUTER_MODEL"),
     "rag_rewrite": ("CHAT_RAG_REWRITE_MODEL", "OLLAMA_RAG_REWRITE_MODEL"),
@@ -59,7 +64,6 @@ def _default_model_for_provider(chat_provider: str) -> str:
 
 def get_model_for_stage(stage: str, default_model: str | None = None) -> str:
     """Resolve stage-specific model override, then fall back to default model."""
-    load_dotenv()
     chat_provider = _chat_provider()
     base_model = (default_model or _default_model_for_provider(chat_provider)).strip()
     env_keys = _STAGE_MODEL_ENV_MAP.get(stage, ())
@@ -72,7 +76,6 @@ def get_model_for_stage(stage: str, default_model: str | None = None) -> str:
 
 def get_timeout_for_stage(stage: str, default_timeout_sec: float | None = None) -> float | None:
     """Resolve stage-specific timeout override in seconds."""
-    load_dotenv()
     env_keys = _STAGE_TIMEOUT_ENV_MAP.get(stage, ())
     for key in env_keys:
         raw = (os.getenv(key, "") or "").strip()
@@ -124,10 +127,45 @@ def _extract_text_from_openai_message_content(content: Any) -> str:
 
 
 def _normalize_contents(contents: Any) -> str:
+    """將 Gemini 慣用的 contents（字串 / list-of-dict / list-of-parts）壓成純 user 字串。
+
+    對 list 型輸入不再盲目 json.dumps，而是抽出 text parts 串接；最後退一步才用 json.dumps。
+    這樣多輪訊息結構雖會被壓平但至少能保留語意，而非把 JSON 字面量當 prompt 餵給 LLM。
+    """
     if isinstance(contents, str):
         return contents.strip()
     if contents is None:
         return ""
+    if isinstance(contents, list):
+        texts: list[str] = []
+        for item in contents:
+            if isinstance(item, str):
+                if item.strip():
+                    texts.append(item.strip())
+                continue
+            if isinstance(item, dict):
+                # Gemini content 格式：{"role": "...", "parts": [{"text": "..."}]}
+                parts = item.get("parts")
+                if isinstance(parts, list):
+                    for p in parts:
+                        if isinstance(p, dict):
+                            t = p.get("text")
+                            if t:
+                                texts.append(str(t).strip())
+                        elif isinstance(p, str) and p.strip():
+                            texts.append(p.strip())
+                    continue
+                # OpenAI 格式：{"role": "...", "content": "..."}
+                t = item.get("text") or item.get("content")
+                if isinstance(t, str) and t.strip():
+                    texts.append(t.strip())
+                    continue
+            # 物件帶 .text 屬性
+            t = getattr(item, "text", None)
+            if isinstance(t, str) and t.strip():
+                texts.append(t.strip())
+        if texts:
+            return "\n\n".join(texts)
     try:
         return json.dumps(contents, ensure_ascii=False)
     except Exception:
@@ -266,8 +304,6 @@ def get_chat_client_and_model() -> Tuple[Any, str]:
     - `EVAL_USE_GROQ=1` with `GROQ_API_KEY`: Groq
     - default fallback: Gemini
     """
-
-    load_dotenv()
 
     chat_provider = os.getenv("CHAT_PROVIDER", "").strip().lower()
     if chat_provider in ("ollama", "local"):

@@ -20,6 +20,9 @@ from pinecone import Pinecone
 
 from llm_client import _normalize_ollama_base_url
 
+# 模組載入時 load 一次；後續 os.getenv 直接讀 process env，避免每次呼叫重跑 dotenv。
+load_dotenv()
+
 
 class _EmbeddingItem:
     def __init__(self, values: list[float]):
@@ -137,8 +140,6 @@ def get_clients_and_index() -> tuple[Any, Any, Any, int, str, str, str]:
     回傳 (chat_client, embed_client, index, dim, llm_model, embed_model, index_name)。
     embed_client 可由 EMBEDDING_PROVIDER 切換（gemini / ollama）。
     """
-    load_dotenv()
-
     from llm_client import get_chat_client_and_model
 
     pinecone_api_key = os.getenv("PINECONE_API_KEY")
@@ -166,7 +167,24 @@ def get_clients_and_index() -> tuple[Any, Any, Any, int, str, str, str]:
         if not google_api_key:
             raise RuntimeError("缺少環境變數 GOOGLE_API_KEY（請放在 .env）")
         embed_model = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001")
-        embed_client = genai.Client(api_key=google_api_key)
+        # 以 httpx_options.timeout 綁定 embed 呼叫逾時，避免 Gemini API hang 拖死整個 RAG 流程
+        try:
+            gemini_timeout_sec = float(os.getenv("GEMINI_EMBED_TIMEOUT_SEC", "60") or "60")
+        except ValueError:
+            gemini_timeout_sec = 60.0
+        try:
+            embed_client = genai.Client(
+                api_key=google_api_key,
+                http_options=types.HttpOptions(timeout=int(gemini_timeout_sec * 1000)),  # ms
+            )
+        except Exception:
+            # 某些 genai 版本 HttpOptions 欄位不同；退回不帶 timeout，並留 log
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "genai.Client 不支援 HttpOptions.timeout，fallback 無 timeout；"
+                "建議升級 google-genai 以啟用 embedding timeout",
+            )
+            embed_client = genai.Client(api_key=google_api_key)
 
     pc = Pinecone(api_key=pinecone_api_key)
 
@@ -239,7 +257,6 @@ def embed_texts(
     """
     if not texts:
         return []
-    load_dotenv()
     delay = batch_delay_sec
     if delay is None:
         try:
@@ -273,7 +290,6 @@ def embed_texts(
 
 def get_bm25_corpus_path() -> Path:
     """BM25 語料檔路徑，可由環境變數 BM25_CORPUS_PATH 覆寫。"""
-    load_dotenv()
     p = os.getenv("BM25_CORPUS_PATH", "bm25_corpus.json")
     return Path(p)
 
@@ -299,6 +315,52 @@ def _bm25_tokenize(text: str) -> list[str]:
     return tokens
 
 
+def _bm25_lock_path() -> Path:
+    """BM25 語料的 lock file 路徑（同目錄，後綴 .lock）。"""
+    p = get_bm25_corpus_path()
+    return p.with_suffix(p.suffix + ".lock") if p.suffix else p.with_name(p.name + ".lock")
+
+
+class _BM25CorpusLock:
+    """跨進程檔案鎖。Linux 用 fcntl.flock；Windows 退化為無鎖（只印 warning）。
+
+    append/save 都應在此 lock 內操作，避免並發寫入互相覆蓋。
+    """
+
+    def __init__(self) -> None:
+        self._fd = None
+
+    def __enter__(self):
+        try:
+            import fcntl  # POSIX-only
+        except ImportError:
+            import logging
+            logging.getLogger(__name__).warning(
+                "fcntl unavailable (non-POSIX); BM25 corpus write is NOT atomic across processes"
+            )
+            return self
+        lock_path = _bm25_lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        # 以 append 模式開檔，避免 truncate lock file（它只是 lock holder）
+        self._fd = open(lock_path, "a+")
+        fcntl.flock(self._fd.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._fd is not None:
+            try:
+                import fcntl
+                fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                self._fd.close()
+            except Exception:
+                pass
+            self._fd = None
+        return False
+
+
 def load_bm25_corpus() -> list[dict[str, Any]]:
     """載入 BM25 語料：每筆為 {id, text, source, chunk_index, chat_id}。無檔或空則回傳 []。"""
     path = get_bm25_corpus_path()
@@ -314,10 +376,21 @@ def load_bm25_corpus() -> list[dict[str, Any]]:
     return [c for c in data if isinstance(c, dict) and c.get("id") and c.get("text") is not None]
 
 
-def save_bm25_corpus(chunks: list[dict[str, Any]]) -> None:
-    """覆寫寫入 BM25 語料檔。每筆應含 id, text, source, chunk_index，可選 chat_id。"""
-    path = get_bm25_corpus_path()
+def _atomic_write_json(path: Path, payload: Any) -> None:
+    """同目錄寫 tmp → os.replace，避免讀者讀到半截檔案。"""
     path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=0)
+    os.replace(tmp, path)
+
+
+def save_bm25_corpus(chunks: list[dict[str, Any]]) -> None:
+    """覆寫寫入 BM25 語料檔。每筆應含 id, text, source, chunk_index，可選 chat_id。
+
+    並發安全：以 fcntl.flock 鎖同目錄的 .lock 檔 + atomic replace。
+    """
+    path = get_bm25_corpus_path()
     out = []
     for c in chunks:
         out.append({
@@ -327,22 +400,33 @@ def save_bm25_corpus(chunks: list[dict[str, Any]]) -> None:
             "chunk_index": int(c.get("chunk_index", 0)),
             "chat_id": c.get("chat_id"),
         })
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=0)
+    with _BM25CorpusLock():
+        _atomic_write_json(path, out)
 
 
 def append_bm25_corpus(chunks: list[dict[str, Any]]) -> None:
-    """將新 chunks 追加至 BM25 語料檔。每筆應含 id, text, source, chunk_index，可選 chat_id。"""
-    existing = load_bm25_corpus()
-    for c in chunks:
-        existing.append({
-            "id": str(c.get("id", "")),
-            "text": str(c.get("text", "")),
-            "source": str(c.get("source", "")),
-            "chunk_index": int(c.get("chunk_index", 0)),
-            "chat_id": c.get("chat_id"),
-        })
-    save_bm25_corpus(existing)
+    """將新 chunks 追加至 BM25 語料檔。並發安全：load→append→save 全部在 flock 內。"""
+    with _BM25CorpusLock():
+        existing = load_bm25_corpus()
+        for c in chunks:
+            existing.append({
+                "id": str(c.get("id", "")),
+                "text": str(c.get("text", "")),
+                "source": str(c.get("source", "")),
+                "chunk_index": int(c.get("chunk_index", 0)),
+                "chat_id": c.get("chat_id"),
+            })
+        out = [
+            {
+                "id": str(c.get("id", "")),
+                "text": str(c.get("text", "")),
+                "source": str(c.get("source", "")),
+                "chunk_index": int(c.get("chunk_index", 0)),
+                "chat_id": c.get("chat_id"),
+            }
+            for c in existing
+        ]
+        _atomic_write_json(get_bm25_corpus_path(), out)
 
 
 def build_bm25_index(corpus: list[dict[str, Any]]):

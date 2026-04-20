@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 
@@ -12,6 +13,8 @@ from backend.schemas.admin import (
     OllamaModelsResponse,
     ServiceStatus,
 )
+
+logger = logging.getLogger(__name__)
 
 MONITORED_SERVICES = (
     "contract-agent-api.service",
@@ -36,15 +39,31 @@ DEFAULT_RESTART_SERVICES = (
 
 
 def _run_cmd(args: list[str], timeout: int = 12) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        args,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        encoding="utf-8",
-        errors="replace",
-    )
+    """執行子程序；逾時轉成 CompletedProcess(returncode=124) 以避免整個 endpoint 500。"""
+    try:
+        return subprocess.run(
+            args,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except subprocess.TimeoutExpired as e:
+        logger.warning(
+            "subprocess timeout after %ss: %s", timeout, " ".join(args), exc_info=True
+        )
+        stdout = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        stderr_msg = f"timeout after {timeout}s"
+        return subprocess.CompletedProcess(
+            args=args, returncode=124, stdout=stdout or "", stderr=stderr_msg
+        )
+    except FileNotFoundError as e:
+        logger.warning("subprocess command not found: %s (%s)", args[0] if args else "?", e)
+        return subprocess.CompletedProcess(
+            args=args, returncode=127, stdout="", stderr=f"command not found: {e}"
+        )
 
 
 def _clean_err(stderr: str, stdout: str) -> str:

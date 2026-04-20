@@ -57,9 +57,19 @@ def log_run(
 
 def load_runs(limit: int = 500) -> list[dict]:
     """讀取最近 limit 筆記錄（新到舊）。若檔案不存在或為空則回傳 []。"""
+    records, _ = load_runs_with_stats(limit=limit)
+    return records
+
+
+def load_runs_with_stats(limit: int = 500) -> tuple[list[dict], int]:
+    """同 load_runs，但額外回傳「因 JSON 解析失敗被丟棄」的行數。
+
+    回傳 (records, dropped)；records 為 dict 新到舊排序。僅計算被視窗內（最近 limit 行）
+    的丟棄數，與 records 的來源一致，避免誤計舊紀錄。
+    """
     path = _path()
     if not path.exists():
-        return []
+        return [], 0
     lines: list[str] = []
     with path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -67,9 +77,11 @@ def load_runs(limit: int = 500) -> list[dict]:
             if line:
                 lines.append(line)
     records: list[dict] = []
+    dropped = 0
     for line in reversed(lines[-limit:]):
         try:
             records.append(json.loads(line))
         except Exception:
+            dropped += 1
             continue
-    return records
+    return records, dropped

@@ -3,6 +3,8 @@ Description=Contract Agent Frontend Vue Service
 After=network-online.target contract-agent-api.service
 Wants=network-online.target
 Requires=contract-agent-api.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple

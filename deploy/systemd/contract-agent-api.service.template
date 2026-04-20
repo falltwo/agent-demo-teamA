@@ -3,6 +3,10 @@ Description=Contract Agent FastAPI Service
 After=network-online.target ollama.service
 Wants=network-online.target
 Requires=ollama.service
+# 避免 Restart=always 遇到啟動失敗時無限重啟打爆 CPU/journal。
+# 60 秒內連續啟動失敗 5 次則 systemd 停止嘗試。
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple

@@ -27,6 +27,10 @@ class EvalRunsResponse(BaseModel):
         description="是否啟用寫入 EVAL_LOG（與 eval_log.is_enabled() 一致）；不影響讀取既有檔案。",
     )
     limit: int = Field(default=500, description="本次載入筆數上限")
+    dropped_rows: int = Field(
+        default=0,
+        description="讀取時因 JSON 解析失敗或結構不合法而被丟棄的列數（僅供前端/運維觀察）。",
+    )
 
 
 class EvalConfigResponse(BaseModel):
@@ -50,4 +54,8 @@ class EvalBatchDetailResponse(BaseModel):
     results: list[dict[str, Any]] = Field(
         default_factory=list,
         description="run_*_results.jsonl 每行一筆原始 JSON",
+    )
+    dropped_rows: int = Field(
+        default=0,
+        description="讀取時因 JSON 解析失敗或非 dict 被丟棄的列數（僅供觀察）。",
     )

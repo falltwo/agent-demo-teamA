@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
+import sys  # noqa: F401
 
 _CONFIGURED = False
 
@@ -51,3 +51,28 @@ def configure_logging() -> None:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
     _CONFIGURED = True
+
+
+def configure_threadpool() -> None:
+    """拉高 FastAPI sync-def 共用的 anyio threadpool 上限。
+
+    Chat 端點是同步 def，呼叫 30-120s 的 LLM；預設 40 thread 的 pool 在高並發會飢餓。
+    透過環境變數 `API_THREADPOOL_LIMIT` 調整（預設 100）。
+    """
+    try:
+        limit = int(os.getenv("API_THREADPOOL_LIMIT", "100"))
+    except (TypeError, ValueError):
+        limit = 100
+    if limit <= 0:
+        return
+    try:
+        # anyio.to_thread.current_default_thread_limiter 只能在 event loop 內呼叫。
+        # 這裡改透過環境變數 + anyio 的 capacity 屬性於 startup event 設。
+        import anyio
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        limiter.total_tokens = limit
+        logging.getLogger(__name__).info("anyio threadpool limit set to %d", limit)
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "Failed to raise anyio threadpool limit: %s", e, exc_info=True
+        )
