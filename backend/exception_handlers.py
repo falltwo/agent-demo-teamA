@@ -42,9 +42,12 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
             request.url.path,
             message,
         )
+    # 保留 HTTPException 自訂 headers（例如 429 的 Retry-After、401 的 WWW-Authenticate）
+    headers = getattr(exc, "headers", None) or None
     return JSONResponse(
         status_code=exc.status_code,
         content=_error_payload(code="HTTP_ERROR", message=message, details=details),
+        headers=headers,
     )
 
 

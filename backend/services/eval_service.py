@@ -7,8 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
 import eval_log
 from backend.schemas.eval import EvalBatchDetailResponse, EvalRunEntry
 
@@ -16,7 +14,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _eval_runs_dir() -> Path:
-    load_dotenv(_PROJECT_ROOT / ".env")
+    # .env 已由 backend.main.create_app 或上游模組 load 過；此處不再每次 reload。
     raw = os.getenv("EVAL_RUNS_DIR", "eval/runs")
     p = Path(raw)
     return p.resolve() if p.is_absolute() else (_PROJECT_ROOT / p).resolve()
@@ -25,13 +23,18 @@ def _eval_runs_dir() -> Path:
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
-def load_online_runs(limit: int = 500) -> tuple[list[EvalRunEntry], bool]:
-    """等同 eval_log.load_runs(limit)，並回傳 eval 寫入是否啟用。"""
-    raw = eval_log.load_runs(limit=limit)
+def load_online_runs(limit: int = 500) -> tuple[list[EvalRunEntry], bool, int]:
+    """等同 eval_log.load_runs(limit)，並回傳 (entries, eval_enabled, dropped_rows)。
+
+    dropped_rows 統計：JSONL 解析失敗 + 非 dict + Pydantic 驗證失敗 的總和。
+    """
+    raw, parse_dropped = eval_log.load_runs_with_stats(limit=limit)
     enabled = eval_log.is_enabled()
     entries: list[EvalRunEntry] = []
+    dropped = int(parse_dropped)
     for row in raw:
         if not isinstance(row, dict):
+            dropped += 1
             continue
         try:
             entries.append(
@@ -47,8 +50,9 @@ def load_online_runs(limit: int = 500) -> tuple[list[EvalRunEntry], bool]:
                 )
             )
         except Exception:
+            dropped += 1
             continue
-    return entries, enabled
+    return entries, enabled, dropped
 
 
 def list_batch_run_ids() -> tuple[list[str], Path]:
@@ -90,6 +94,7 @@ def load_batch_detail(run_id: str) -> EvalBatchDetailResponse | None:
         return None
 
     results: list[dict[str, Any]] = []
+    dropped = 0
     with results_path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -97,10 +102,13 @@ def load_batch_detail(run_id: str) -> EvalBatchDetailResponse | None:
                 continue
             try:
                 obj = json.loads(line)
-                if isinstance(obj, dict):
-                    results.append(obj)
             except json.JSONDecodeError:
+                dropped += 1
                 continue
+            if isinstance(obj, dict):
+                results.append(obj)
+            else:
+                dropped += 1
 
     metrics: dict[str, Any] | None = None
     metrics_path = runs_dir / f"{run_id}_metrics.json"
@@ -112,4 +120,9 @@ def load_batch_detail(run_id: str) -> EvalBatchDetailResponse | None:
         except Exception:
             metrics = None
 
-    return EvalBatchDetailResponse(run_id=run_id, metrics=metrics, results=results)
+    return EvalBatchDetailResponse(
+        run_id=run_id,
+        metrics=metrics,
+        results=results,
+        dropped_rows=dropped,
+    )

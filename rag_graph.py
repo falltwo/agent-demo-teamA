@@ -500,6 +500,7 @@ def _build_graph():
                                 seen_keys.add(k)
                                 raw_matches.append(m)
                     except Exception as e:
+                        _note_degraded(state, "aux_query_failed")
                         logger.warning("Auxiliary query failed for %r: %s", aux_q, e, exc_info=True)
                 merge_cap = int(os.getenv("RAG_MERGE_CAP", str(2 * internal_top_k)))
                 if len(raw_matches) > merge_cap:
@@ -680,6 +681,26 @@ def _build_graph():
         else:
             prompt = f"## 問題\n{question}\n\n## 檢索專家提供的脈絡（原始條文脈絡與知識庫參考依據）\n{packaged_context}"
 
+        try:
+            _bump_llm_call("rag_generate")
+        except LLMBudgetExceeded:
+            _note_degraded(state, "generate_budget_exceeded")
+            logger.warning("Generate skipped: LLM budget exhausted; returning degraded answer")
+            answer = (
+                "本次檢索呼叫次數已達上限，為避免失控成本已提早結束。\n"
+                "請稍後再試，或將 `RAG_MAX_LLM_CALLS` 調高後重試。"
+            )
+            return {
+                "question": question,
+                "top_k": state.get("top_k", int(os.getenv("TOP_K", "5"))),
+                "context": context,
+                "sources": state.get("sources", []),
+                "chunks": state.get("chunks", []),
+                "answer": answer,
+                "history": history,
+                "strict": strict,
+                "packaged_context": packaged_context,
+            }
         out = chat_client.models.generate_content(
             model=rag_generate_model,
             contents=prompt,
@@ -734,6 +755,7 @@ def run_rag(
     chat_id：若設定，檢索僅限此對話上傳的 chunks；亦用於 Checkpointing 的 thread_id（同一對話可沿用同一 id 以支援未來重放／續跑）。
     """
     graph = _build_graph()
+    _reset_llm_budget(_get_max_llm_calls())
     state: dict[str, Any] = {
         "question": question,
         "top_k": top_k or int(os.getenv("TOP_K", "5")),
@@ -744,6 +766,8 @@ def run_rag(
         "history": list(history or []),
         "strict": strict,
         "packaged_context": "",
+        "llm_calls": 0,
+        "degraded_steps": [],
     }
     if chat_id:
         state["chat_id"] = chat_id
@@ -761,6 +785,8 @@ def run_rag(
         "history": result_raw.get("history", state["history"]),
         "strict": bool(result_raw.get("strict", state["strict"])),
         "packaged_context": result_raw.get("packaged_context", ""),
+        "llm_calls": _get_llm_calls(),
+        "degraded_steps": list(result_raw.get("degraded_steps") or []),
     }
     if result_raw.get("error"):
         result["error"] = result_raw["error"]

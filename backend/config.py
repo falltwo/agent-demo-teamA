@@ -39,8 +39,13 @@ class Settings(BaseSettings):
     ingest_max_file_mb: float = Field(default=32.0, validation_alias="INGEST_MAX_FILE_MB")
     ingest_max_total_mb: float = Field(default=128.0, validation_alias="INGEST_MAX_TOTAL_MB")
     ingest_max_files: int = Field(default=20, ge=1, validation_alias="INGEST_MAX_FILES")
-    # 預設僅記憶體處理；若設為路徑，未來可將超大檔 spill 至此並於完成後刪除
-    ingest_temp_dir: str | None = Field(default=None, validation_alias="INGEST_TEMP_DIR")
+    # 預設僅記憶體處理；若設為路徑，未來可將超大檔 spill 至此並於完成後刪除。
+    # 目前 `ingest_service` 尚未讀取此欄位（保留給背景 job 規格，參見 backend/README.md）。
+    ingest_temp_dir: str | None = Field(
+        default=None,
+        validation_alias="INGEST_TEMP_DIR",
+        description="保留欄位，目前未使用；規劃作為未來背景 ingest job 的 spill-to-disk 路徑。",
+    )
 
     # Admin API 保護用 Bearer token；若未設定則不驗證（向後相容）
     admin_api_token: str | None = Field(

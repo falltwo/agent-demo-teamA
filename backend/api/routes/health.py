@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import os
+from functools import lru_cache
 
 import httpx
 from fastapi import APIRouter
 
 from backend.api.deps import SettingsDep
 from backend.schemas.health import HealthResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["health"])
 
@@ -20,22 +24,32 @@ def _check_ollama() -> bool:
     try:
         r = httpx.get(f"{base}/api/tags", timeout=3.0)
         return r.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.info("Ollama health probe failed: %s", e)
         return False
+
+
+@lru_cache(maxsize=1)
+def _get_pinecone_client(api_key: str):
+    """快取 Pinecone client，避免每次 /health 都重新建連線。
+
+    lru_cache 以 api_key 為 key；若 key 變動會自然重建。
+    """
+    from pinecone import Pinecone
+    return Pinecone(api_key=api_key)
 
 
 def _check_pinecone() -> bool:
     """嘗試列出 Pinecone indexes，確認 API key 有效且服務可達。"""
     try:
-        from pinecone import Pinecone
-
         api_key = os.getenv("PINECONE_API_KEY", "")
         if not api_key:
             return False
-        pc = Pinecone(api_key=api_key)
+        pc = _get_pinecone_client(api_key)
         pc.list_indexes()
         return True
-    except Exception:
+    except Exception as e:
+        logger.info("Pinecone health probe failed: %s", e)
         return False
 
 

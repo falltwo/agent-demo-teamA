@@ -25,8 +25,13 @@ def get_eval_config() -> EvalConfigResponse:
 def get_eval_runs(limit: int = 500) -> EvalRunsResponse:
     """線上運行記錄（eval_runs.jsonl），新到舊最多 limit 筆。"""
     lim = max(1, min(limit, 500))
-    entries, enabled = eval_service.load_online_runs(limit=lim)
-    return EvalRunsResponse(entries=entries, eval_log_enabled=enabled, limit=lim)
+    entries, enabled, dropped = eval_service.load_online_runs(limit=lim)
+    return EvalRunsResponse(
+        entries=entries,
+        eval_log_enabled=enabled,
+        limit=lim,
+        dropped_rows=dropped,
+    )
 
 
 @router.get("/batch/runs", response_model=EvalBatchListResponse)

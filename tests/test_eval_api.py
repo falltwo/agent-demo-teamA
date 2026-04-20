@@ -42,6 +42,7 @@ def test_get_eval_runs(mock_load: object, client: TestClient) -> None:
             )
         ],
         True,
+        0,
     )
     r = client.get("/api/v1/eval/runs")
     assert r.status_code == 200
@@ -50,6 +51,7 @@ def test_get_eval_runs(mock_load: object, client: TestClient) -> None:
     assert len(data["entries"]) == 1
     assert data["entries"][0]["tool_name"] == "rag_search"
     assert data["limit"] == 500
+    assert data["dropped_rows"] == 0
 
 
 def test_eval_batch_list_and_detail(
