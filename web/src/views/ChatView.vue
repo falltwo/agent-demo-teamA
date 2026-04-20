@@ -41,6 +41,7 @@ const input = ref("");
 const sending = ref(false);
 const chatError = ref<unknown>(null);
 const streamingStatus = ref<string | null>(null);
+const currentAbortController = ref<AbortController | null>(null);
 const settingsOpen = ref(false);
 const scopeSyncState = ref<"loading" | "has" | "none" | "error">("loading");
 const railTab = ref<RailTab>("risk");
@@ -351,6 +352,10 @@ function onTextareaKeydown(event: KeyboardEvent) {
   }
 }
 
+function stopStreaming() {
+  currentAbortController.value?.abort();
+}
+
 async function sendMessage() {
   const raw = input.value.trim();
   if (!raw || sending.value) {
@@ -382,6 +387,10 @@ async function sendMessage() {
     ...pendingPart,
   };
 
+  // 建立 AbortController，供使用者中斷使用
+  const abortCtrl = new AbortController();
+  currentAbortController.value = abortCtrl;
+
   // 插入空的 assistant placeholder，streaming 時逐步填入
   conversation.appendStreamingPlaceholder(convId);
   let hasReceivedTokens = false;
@@ -405,16 +414,24 @@ async function sendMessage() {
       onDone() {
         streamingStatus.value = null;
       },
+      onAbort() {
+        streamingStatus.value = null;
+        // 已收到部分 token：保留已生成的內容，標記為中斷
+        if (hasReceivedTokens) {
+          conversation.finalizeStreamingMessage(convId, {});
+        } else {
+          conversation.removeLastMessage(convId);
+        }
+      },
       onError(message) {
         streamingStatus.value = null;
-        // 如果還沒收到任何 token，移除 placeholder
         if (!hasReceivedTokens) {
           conversation.removeLastMessage(convId);
         }
         chatError.value = new Error(message);
         pushToast({ variant: "error", message });
       },
-    });
+    }, abortCtrl.signal);
   } catch (error) {
     streamingStatus.value = null;
     if (!hasReceivedTokens) {
@@ -428,6 +445,7 @@ async function sendMessage() {
   } finally {
     sending.value = false;
     streamingStatus.value = null;
+    currentAbortController.value = null;
   }
 }
 </script>
@@ -631,10 +649,20 @@ async function sendMessage() {
               @keydown="onTextareaKeydown"
             />
             <button
+              v-if="sending"
+              type="button"
+              class="assistant-composer__send assistant-composer__send--stop"
+              title="中斷回覆"
+              @click="stopStreaming()"
+            >
+              ■
+            </button>
+            <button
+              v-else
               type="button"
               data-testid="chat-send"
               class="assistant-composer__send"
-              :disabled="sending || !input.trim()"
+              :disabled="!input.trim()"
               @click="sendMessage()"
             >
               Go
@@ -1115,6 +1143,17 @@ async function sendMessage() {
 .assistant-composer__send:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.assistant-composer__send--stop {
+  background: #ef4444;
+  font-size: 1rem;
+  letter-spacing: 0;
+  transition: background-color 120ms ease;
+}
+
+.assistant-composer__send--stop:hover {
+  background: #dc2626;
 }
 
 @media (max-width: 1200px) {

@@ -33,15 +33,19 @@ export interface StreamChatCallbacks {
   onDone?: () => void;
   /** 發生錯誤 */
   onError?: (message: string) => void;
+  /** 使用者主動中斷（不視為錯誤） */
+  onAbort?: () => void;
 }
 
 /**
  * 使用 fetch + ReadableStream 讀取 SSE。
  * 比原生 EventSource 更靈活（支援 POST body）。
+ * 傳入 signal 可由外部 AbortController 中斷 stream。
  */
 export async function postChatStream(
   body: ChatRequest,
   callbacks: StreamChatCallbacks,
+  signal?: AbortSignal,
 ): Promise<void> {
   const baseUrl = resolveApiBaseUrl();
   const url = `${baseUrl}/api/v1/chat/stream`;
@@ -52,8 +56,13 @@ export async function postChatStream(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
   } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      callbacks.onAbort?.();
+      return;
+    }
     callbacks.onError?.(`無法連接後端：${err instanceof Error ? err.message : String(err)}`);
     return;
   }
@@ -76,6 +85,7 @@ export async function postChatStream(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (signal?.aborted) break;
 
       buffer += decoder.decode(value, { stream: true });
 
@@ -126,7 +136,11 @@ export async function postChatStream(
       }
     }
   } catch (err) {
-    callbacks.onError?.(`Stream 中斷：${err instanceof Error ? err.message : String(err)}`);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      callbacks.onAbort?.();
+    } else {
+      callbacks.onError?.(`Stream 中斷：${err instanceof Error ? err.message : String(err)}`);
+    }
   } finally {
     reader.releaseLock();
   }
