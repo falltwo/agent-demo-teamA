@@ -29,6 +29,8 @@ const uploadInput = ref<HTMLInputElement | null>(null);
 const uploadBusy = ref(false);
 const deletingId = ref<string | null>(null);
 const confirmDeleteId = ref<string | null>(null);
+const collapsedRecent = ref(false);
+const collapsedIndexed = ref(false);
 
 const isFrontWorkspace = computed(() => !IS_ADMIN_TARGET);
 
@@ -326,11 +328,16 @@ onMounted(() => {
         </div>
 
         <section class="doc-group">
-          <div class="doc-group__head">
-            <span class="doc-group__chevron" aria-hidden="true">v</span>
+          <button
+            type="button"
+            class="doc-group__head"
+            :aria-expanded="!collapsedRecent"
+            @click="collapsedRecent = !collapsedRecent"
+          >
+            <span class="doc-group__chevron" :class="{ 'doc-group__chevron--collapsed': collapsedRecent }" aria-hidden="true"></span>
             <h3>最近審閱</h3>
-          </div>
-          <div class="doc-group__list">
+          </button>
+          <div v-show="!collapsedRecent" class="doc-group__list">
             <div
               v-for="doc in filteredRecentDocs"
               :key="doc.id"
@@ -367,12 +374,17 @@ onMounted(() => {
         </section>
 
         <section class="doc-group doc-group--grow">
-          <div class="doc-group__head">
-            <span class="doc-group__chevron" aria-hidden="true">v</span>
+          <button
+            type="button"
+            class="doc-group__head"
+            :aria-expanded="!collapsedIndexed"
+            @click="collapsedIndexed = !collapsedIndexed"
+          >
+            <span class="doc-group__chevron" :class="{ 'doc-group__chevron--collapsed': collapsedIndexed }" aria-hidden="true"></span>
             <h3>已索引文件</h3>
             <span class="doc-group__count">{{ documentCount }}</span>
-          </div>
-          <div class="doc-group__list">
+          </button>
+          <div v-show="!collapsedIndexed" class="doc-group__list">
             <div
               v-for="doc in filteredIndexedDocs"
               :key="doc.id"
@@ -707,8 +719,19 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 4px;
+  width: 100%;
+  padding: 4px 4px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
   color: #475569;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 120ms ease;
+}
+
+.doc-group__head:hover {
+  background: #f1f5f9;
 }
 
 .doc-group__head h3 {
@@ -719,8 +742,18 @@ onMounted(() => {
 }
 
 .doc-group__chevron {
-  font-size: 0.74rem;
-  color: #94a3b8;
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  transition: transform 180ms ease;
+}
+
+.doc-group__chevron--collapsed {
+  transform: rotate(-90deg);
 }
 
 .doc-group__count {
