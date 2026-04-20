@@ -926,14 +926,18 @@ def route_and_answer(
         answer, sources, chunks = contract_risk_agent(
             question=question, top_k=top_k_expert, history=history, strict=strict, chat_id=rag_scope_chat_id
         )
-        # 從答案中萃取法條引用（如「民法第188條」），構建全國法規資料庫查詢連結加入 sources
-        _law_refs = _extract_law_refs_from_text(answer)
+        # 從 LLM 回答 + 合約切片原文同時萃取法條引用，構建全國法規資料庫連結加入 sources
+        _chunks_text = "\n".join(
+            c.get("text", "") for c in chunks if isinstance(c, dict)
+        )
+        _law_refs = _extract_law_refs_from_text(answer + "\n" + _chunks_text)
         if _law_refs:
             _law_urls = [
                 f"https://law.moj.gov.tw/LawClass/LawSearchAll.aspx?kw={urllib.parse.quote(_ref, safe='')}"
                 for _ref in _law_refs
             ]
             sources = list(sources) + _law_urls
+            logger.info("contract_risk_agent: appended %d law ref URLs to sources", len(_law_urls))
         return answer, sources, chunks, "contract_risk_agent", None
 
     if tool == "contract_risk_with_law_search":
