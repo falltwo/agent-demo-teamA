@@ -1,8 +1,10 @@
 import logging
+import mimetypes
 from pathlib import Path, PurePosixPath
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from backend.api.deps import SettingsDep
 from backend.schemas.ingest import (
@@ -89,6 +91,32 @@ def delete_source(
         "source": normalized_source,
         "vector_count": len(vector_ids),
     }
+
+
+@router.get("/sources/download")
+def download_source(
+    settings: SettingsDep,
+    source: Annotated[str, Query(description="完整 source 路徑（如 uploaded/<chat_id>/<filename>）")],
+) -> FileResponse:
+    """下載原始上傳檔案。"""
+    normalized = source.strip().replace("\\", "/")
+    if not normalized:
+        raise HTTPException(status_code=400, detail="source is required")
+    # Block path traversal
+    try:
+        file_path = (Path(settings.upload_store_dir) / normalized).resolve()
+        store_root = Path(settings.upload_store_dir).resolve()
+        file_path.relative_to(store_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid source path")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found — it may have been uploaded before download support was added")
+    media_type, _ = mimetypes.guess_type(file_path.name)
+    return FileResponse(
+        path=str(file_path),
+        filename=file_path.name,
+        media_type=media_type or "application/octet-stream",
+    )
 
 
 @router.get("/sources/preview", response_model=SourcePreviewResponse)
