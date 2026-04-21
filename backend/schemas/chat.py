@@ -38,12 +38,41 @@ class ChunkItem(BaseModel):
     text: str = ""
 
 
+class RiskCard(BaseModel):
+    """結構化合約風險卡片；由 `contract_risk_parser.parse_risk_cards` 從 markdown 拆出。
+
+    * 合約審閱類 tool（`contract_risk_agent` / `contract_risk_with_law_search`）會在
+      `ChatResponse.extra.risk_cards` 填入；其他 tool 不填。
+    * 前端若收到此欄位會優先用結構化資料渲染，否則 fallback 到 markdown regex parse。
+    """
+
+    model_config = {"extra": "allow"}
+
+    id: str
+    article: str | None = None
+    title: str
+    clauseType: str | None = None
+    riskLevel: Literal["high", "medium", "low"]
+    riskLabel: str | None = Field(default=None, description="原 markdown 文字（高風險/中風險/低風險）")
+    quotedText: str | None = None
+    reasoning: str | None = None
+    suggestion: str | None = None
+    lawRefs: list[str] = Field(default_factory=list)
+    chunkHint: str | None = None
+
+
 class ChatResponse(BaseModel):
     answer: str
     sources: list[str]
     chunks: list[ChunkItem]
     tool_name: str
-    extra: dict[str, Any] | None = None
+    extra: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Tool-specific metadata. 合約審閱路徑會帶 `risk_cards: list[RiskCard]`；"
+            "其他 tool 可能帶 `asked_chart_confirmation` / `chart_query` 等欄位。"
+        ),
+    )
     latency_sec: float = Field(..., description="本次呼叫耗時（秒），供觀測用")
     next_original_question_for_clarification: str | None = Field(
         default=None,

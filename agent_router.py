@@ -22,6 +22,7 @@ from expert_agents import (
     financial_report_agent,
 )
 from echarts_tools import create_chart_option
+from contract_risk_parser import parse_risk_cards
 from firecrawl_tools import scrape_url, search_and_scrape
 from intent_detector import (
     _extract_url_from_text,
@@ -846,14 +847,18 @@ def route_and_answer(
             ]
             sources = list(sources) + _law_urls
             logger.info("contract_risk_agent: appended %d law ref URLs to sources", len(_law_urls))
-        return answer, sources, chunks, "contract_risk_agent", None
+        risk_cards = parse_risk_cards(answer)
+        extra = {"risk_cards": risk_cards} if risk_cards else None
+        return answer, sources, chunks, "contract_risk_agent", extra
 
     if tool == "contract_risk_with_law_search":
         top_k_expert = max(top_k, int(tool_args.get("top_k") or top_k))
         answer, sources, chunks = _contract_risk_with_law_search_impl(
             question=question, top_k=top_k_expert, history=history, chat_id=rag_scope_chat_id
         )
-        return answer, sources, chunks, "contract_risk_with_law_search", None
+        risk_cards = parse_risk_cards(answer)
+        extra = {"risk_cards": risk_cards} if risk_cards else None
+        return answer, sources, chunks, "contract_risk_with_law_search", extra
 
     if tool == "rag_search":
         rag_state = run_rag(question=question, top_k=top_k, history=history, strict=False, chat_id=rag_scope_chat_id)

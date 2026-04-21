@@ -40,22 +40,43 @@ Traditional Chinese documentation: [README.md](README.md).
 flowchart TD
     U([User Input]) --> AR[Agent Router\nagent_router.py]
 
-    AR -->|RAG knowledge base| RG[LangGraph RAG\nrag_graph.py]
-    AR -->|Contract risk| CA[Contract Risk Agent\nexpert_agents.py]
-    AR -->|Legal lookup| LS[Legal Research\nTavily + Firecrawl]
-    AR -->|Data / ESG / Finance| EA[Expert Agents\nexpert_agents.py]
+    %% Intent detection: rule-first (intent_detector.py), fall back to LLM
+    AR --> ID{Intent Detection\nintent_detector.py}
+    ID -->|rule: contract + law| CRL[contract_risk_with_law_search]
+    ID -->|rule: contract review| CRA[ContractRiskAgent]
+    ID -->|rule: judicial.gov.tw| TLW[tw_law_web_search\nTavily + judicial.gov.tw]
+    ID -->|no rule match| LLMD{LLM router decision}
 
-    RG --> Q[Query Rewrite\ncheap model]
-    Q --> RET[Hybrid Retrieval\nPinecone + BM25]
-    RET --> RK[Rerank\noptional]
-    RK --> GEN[Dual-prompt Generation\nInvestigator → Judge]
+    LLMD -->|RAG knowledge base| RG[LangGraph RAG\nrag_graph.py]
+    LLMD -->|Research mode| RES[research\nRAG + Web]
+    LLMD -->|Finance / ESG / Data| EA[Expert Agents\nexpert_agents.py]
+    LLMD -->|Web search| WS[web_search\nTavily]
+    LLMD -->|Chart analysis| CH[analyze_and_chart\nECharts MCP]
+    LLMD -->|Small talk| ST[small_talk\nDirect LLM]
 
-    CA --> RET
-    LS --> LS1[Extract references] --> LS2[Query legal DB] --> LS3[Clause comparison]
+    %% RAG is shared infra — contract / expert paths call it internally
+    CRL -->|retrieve_only| RG
+    CRA -->|retrieve_only| RG
+    EA  -->|retrieve_only| RG
+    RES --> RG
+
+    %% Law search is a sub-step of contract+law, with SSE status emitted
+    CRL -.sub-flow.-> LS[Law Search\nTavily → judicial.gov.tw\nparallel, max 4 refs]
+    CRL -.progress.-> PG[SSE status\ncontract_retrieve → law_search → contract_generate]
+
+    %% RAG state machine
+    RG --> Q[Query Rewrite + Multi-query\nparallel embedding+search]
+    Q --> RET[Hybrid Retrieval\nPinecone + BM25 jieba]
+    RET --> RK[Rerank\nMMR default / LLM / none]
+    RK --> PKG[Investigator packs evidence]
+    PKG --> GEN[Judge evaluates risk]
 
     GEN --> OUT([Answer + Citations + Risk annotation])
-    LS3 --> OUT
-    EA --> OUT
+    LS --> OUT
+    WS --> OUT
+    TLW --> OUT
+    CH --> OUT
+    ST --> OUT
 ```
 
 ### LangGraph RAG State Machine
@@ -63,10 +84,11 @@ flowchart TD
 ```mermaid
 stateDiagram-v2
     [*] --> retrieve : user question
-    retrieve --> rewrite : needs query expansion
+    retrieve --> rewrite : RAG_MULTI_QUERY=1
     retrieve --> rerank : direct rerank
-    rewrite --> rerank
-    rerank --> package : Investigator assembles evidence
+    rewrite --> aux_parallel : generate aux queries
+    aux_parallel --> rerank : ThreadPool\n(RAG_AUX_QUERY_CONCURRENCY=4)
+    rerank --> package : Investigator assembles evidence\n(RAG_RERANK_METHOD=mmr|llm|none)
     package --> generate : Judge evaluates risk
     generate --> [*] : answer + sources + risk annotation
 ```
@@ -316,8 +338,8 @@ Enable strict mode in the UI to restrict answers to knowledge-base content only.
 | Backend | FastAPI, Pydantic Settings, Uvicorn |
 | Frontend | Vue 3, Vite, Pinia, Vue Router |
 | Demo UI | Streamlit |
-| AI / RAG | LangGraph, Pinecone, BM25, Ollama, Google Gemini |
-| External tools | Tavily, Firecrawl, Groq |
+| AI / RAG | LangGraph, Pinecone, BM25 (jieba), Ollama, Google Gemini |
+| External tools | Tavily (law / web search), Groq, Firecrawl (optional web scraping) |
 | Testing | pytest, Playwright |
 | CI/CD | GitHub Actions + Tailscale SSH |
 

@@ -320,6 +320,112 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Delete Source",
+        "description": "從知識庫（BM25 語料 + Pinecone + 來源註冊表）刪除指定來源的所有向量。",
+        "operationId": "delete_source_api_v1_sources_delete",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "完整 source 路徑（如 uploaded/<chat_id>/<filename>）",
+              "title": "Source"
+            },
+            "description": "完整 source 路徑（如 uploaded/<chat_id>/<filename>）"
+          },
+          {
+            "name": "chat_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "對話 ID（選填）",
+              "title": "Chat Id"
+            },
+            "description": "對話 ID（選填）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Source Api V1 Sources Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sources/download": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Download Source",
+        "description": "下載原始上傳檔案。",
+        "operationId": "download_source_api_v1_sources_download_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "完整 source 路徑（如 uploaded/<chat_id>/<filename>）",
+              "title": "Source"
+            },
+            "description": "完整 source 路徑（如 uploaded/<chat_id>/<filename>）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/sources/preview": {
@@ -729,7 +835,8 @@
                 "type": "null"
               }
             ],
-            "title": "Extra"
+            "title": "Extra",
+            "description": "Tool-specific metadata. 合約審閱路徑會帶 `risk_cards: list[RiskCard]`；其他 tool 可能帶 `asked_chart_confirmation` / `chart_query` 等欄位。"
           },
           "latency_sec": {
             "type": "number",
@@ -879,6 +986,12 @@
             "type": "array",
             "title": "Results",
             "description": "run_*_results.jsonl 每行一筆原始 JSON"
+          },
+          "dropped_rows": {
+            "type": "integer",
+            "title": "Dropped Rows",
+            "description": "讀取時因 JSON 解析失敗或非 dict 被丟棄的列數（僅供觀察）。",
+            "default": 0
           }
         },
         "type": "object",
@@ -1002,6 +1115,12 @@
             "title": "Limit",
             "description": "本次載入筆數上限",
             "default": 500
+          },
+          "dropped_rows": {
+            "type": "integer",
+            "title": "Dropped Rows",
+            "description": "讀取時因 JSON 解析失敗或結構不合法而被丟棄的列數（僅供前端/運維觀察）。",
+            "default": 0
           }
         },
         "type": "object",
