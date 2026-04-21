@@ -136,7 +136,7 @@ function mdToHtml(src: string): string {
 
 function extractField(block: string, label: string): string {
   const re = new RegExp(`【${label}】([\\s\\S]*?)(?=【|$)`);
-  return (block.match(re)?.[1] ?? "").replace(/\n+/g, " ").trim();
+  return (block.match(re)?.[1] ?? "").trim();
 }
 
 function severityFromLabel(label: string): RiskCard["severity"] {
@@ -160,7 +160,7 @@ function parseAnswerToCards(answer: string): RiskCard[] {
 
   return blocks.slice(0, 15).map((block, index) => {
     const titleMatch = block.match(ARTICLE_HEADER_RE);
-    const title = titleMatch?.[1]?.trim() || `條款 ${index + 1}`;
+    const title = (titleMatch?.[1]?.trim() || `條款 ${index + 1}`).replace(/\*+/g, "").trim();
     const typeLabel = extractField(block, "條款類型");
     const riskLabel = extractField(block, "風險等級");
     const analysis = extractField(block, "法務實務推演");
