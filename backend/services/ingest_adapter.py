@@ -1,12 +1,21 @@
 """驗證上傳大小／數量後呼叫 `ingest_service.ingest_file_items`。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import HTTPException, UploadFile
 
 from backend.config import Settings
 from backend.schemas.ingest import IngestUploadResponse, SourceEntry
 from backend.rag_clients import get_cached_rag_stack
 from ingest_service import ALLOWED_SUFFIXES, ingest_file_items, sanitize_upload_filename
+
+
+def _save_upload(store_dir: str, source: str, data: bytes) -> None:
+    """將原始檔位元組持久化到 store_dir / source。"""
+    dest = Path(store_dir) / source
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
 
 
 async def _read_file_limited(upload: UploadFile, max_bytes: int) -> tuple[str, bytes]:
@@ -81,6 +90,14 @@ async def run_ingest_upload(
         embed_model=embed_model,
         chat_id=chat_id,
     )
+
+    # Persist original files so /sources/download can serve them later
+    for name, raw in items:
+        source_path = f"uploaded/{chat_id}/{name}" if chat_id else f"uploaded/{name}"
+        try:
+            _save_upload(settings.upload_store_dir, source_path, raw)
+        except Exception:
+            pass  # non-fatal: download won't work but ingest succeeded
 
     return IngestUploadResponse(
         chunks_ingested=n,

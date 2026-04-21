@@ -36,6 +36,16 @@ export async function deleteSource(
   });
 }
 
+export function downloadSource(source: string): void {
+  const url = `/api/v1/sources/download?source=${encodeURIComponent(source)}`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 export async function getSourcePreview(
   source: string,
   chatId?: string | null,

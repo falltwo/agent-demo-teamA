@@ -47,6 +47,12 @@ class Settings(BaseSettings):
         description="保留欄位，目前未使用；規劃作為未來背景 ingest job 的 spill-to-disk 路徑。",
     )
 
+    # 上傳檔案的原始檔落地目錄（供 /sources/download 端點使用）
+    upload_store_dir: str = Field(
+        default=str(_PROJECT_ROOT / "uploads"),
+        validation_alias="UPLOAD_STORE_DIR",
+    )
+
     # Admin API 保護用 Bearer token；若未設定則不驗證（向後相容）
     admin_api_token: str | None = Field(
         default=None,

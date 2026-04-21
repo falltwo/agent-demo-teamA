@@ -4,7 +4,7 @@ import { useRoute } from "vue-router";
 import { marked } from "marked";
 
 import { postChatStream } from "@/api/chatStream";
-import { getSourcePreview, getSources, type SourcePreviewResponse } from "@/api/sources";
+import { downloadSource, getSourcePreview, getSources, type SourcePreviewResponse } from "@/api/sources";
 import ChatAssistantMessage from "@/components/chat/ChatAssistantMessage.vue";
 import ChatRetrievalSettingsModal from "@/components/chat/ChatRetrievalSettingsModal.vue";
 import ApiErrorBlock from "@/components/ui/ApiErrorBlock.vue";
@@ -498,7 +498,13 @@ async function sendMessage() {
           </div>
 
           <div class="viewer-toolbar__right">
-            <button type="button" class="viewer-icon viewer-icon--wide" aria-label="下載">Save</button>
+            <button
+              type="button"
+              class="viewer-icon viewer-icon--wide"
+              aria-label="下載"
+              :disabled="!preview?.source"
+              @click="preview?.source && downloadSource(preview.source)"
+            >Save</button>
           </div>
         </header>
 
