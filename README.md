@@ -37,6 +37,7 @@
 ### 請求處理流程
 
 ```mermaid
+```mermaid
 flowchart TD
     U([使用者輸入]) --> AR[Agent Router\nagent_router.py]
 
@@ -48,29 +49,41 @@ flowchart TD
     TOOLS -->|RAG 知識庫| RAG[LangGraph RAG\nrag_graph.py]
     TOOLS -->|研究模式| RES[RAG + Web 搜尋\nresearch]
     TOOLS -->|財報/ESG/資料| EA[專家代理\nexpert_agents.py]
-    TOOLS -->|純網路搜尋| WS[Tavily 搜尋]
-    TOOLS -->|圖表分析| CH[ECharts 圖表\nanalyze_and_chart]
+    TOOLS -->|純網路搜尋\n不需知識庫語境| WS[Tavily 搜尋]
+    TOOLS -->|圖表分析\n不需知識庫語境| CH[ECharts 圖表\nanalyze_and_chart]
     TOOLS -->|閒聊| ST[直接 LLM\nsmall_talk]
 
     %% RAG 是所有知識庫查詢的基礎
     CRL --> RAG
     CRA --> RAG
-    EA --> RAG
+    EA -->|領域前處理後\n財報格式化／ESG指標抽取| RAG
     RES --> RAG
 
     %% 法條查詢是合約分析的子流程
     CRL --> LS[法條搜尋\nTavily→judicial.gov.tw]
 
+    %% RAG 核心流程
     RAG --> Q[Query 重寫] --> RET[混合檢索\nPinecone+BM25]
     RET --> RK[MMR/LLM 重排序]
     RK --> PKG[調查員打包]
     PKG --> GEN[判官生成]
 
-    GEN --> OUT([回答+引用來源+風險標注])
+    %% 備援路徑
+    RAG -->|檢索無結果或信心值低| FB[備援\n提示補充資訊]
+    FB --> OUT
+
+    %% AI 自檢（合約+法條模式）
+    GEN --> CHK[AI 自檢\n驗證答案與來源一致性]
+    CHK --> OUT
+
+    %% 純工具直接輸出
     LS --> OUT
     WS --> OUT
     CH --> OUT
     ST --> OUT
+
+    OUT([回答+引用來源+風險標注])
+```
 ```
 
 ### LangGraph RAG 狀態機
