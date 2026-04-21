@@ -42,6 +42,60 @@ const input = ref("");
 const sending = ref(false);
 const chatError = ref<unknown>(null);
 const streamingStatus = ref<string | null>(null);
+
+/** 合約+法條流程後端推送的 stage 名稱（依序）；用於 stepper UI */
+const CONTRACT_LAW_STAGES = [
+  { key: "contract_retrieve", label: "檢索合約" },
+  { key: "law_search", label: "搜尋法條" },
+  { key: "contract_generate", label: "產出風險評估" },
+] as const;
+type StageState = "pending" | "active" | "done";
+type StreamStage = { key: string; label: string; message: string; state: StageState };
+const streamingStages = ref<StreamStage[]>([]);
+
+function resetStreamingStages() {
+  streamingStages.value = [];
+}
+
+function handleStreamStatus(stage: string, message: string) {
+  // 只在合約+法條流程顯示 stepper（其他路徑沿用單行 streamingStatus）
+  const hit = CONTRACT_LAW_STAGES.find((s) => s.key === stage);
+  if (hit) {
+    const existing = streamingStages.value;
+    const knownKeys = existing.map((s) => s.key);
+    // 初次進入合約流程：展開全部 stages（未命中的保持 pending）
+    if (existing.length === 0) {
+      streamingStages.value = CONTRACT_LAW_STAGES.map((s) => ({
+        key: s.key,
+        label: s.label,
+        message: s.key === stage ? message : "",
+        state: s.key === stage ? "active" : "pending",
+      }));
+    } else {
+      // 把之前 active 的標 done、當前標 active
+      streamingStages.value = existing.map((s) => {
+        if (s.key === stage) return { ...s, message, state: "active" };
+        if (s.state === "active" && CONTRACT_LAW_STAGES.findIndex((c) => c.key === s.key)
+            < CONTRACT_LAW_STAGES.findIndex((c) => c.key === stage)) {
+          return { ...s, state: "done" };
+        }
+        return s;
+      });
+      // 若是尚未加入的 stage（理論上不會），補上
+      if (!knownKeys.includes(stage)) {
+        streamingStages.value.push({ key: stage, label: hit.label, message, state: "active" });
+      }
+    }
+  }
+  streamingStatus.value = message;
+}
+
+function finalizeStreamingStages() {
+  // 結束時把所有 active/pending 的合約 stage 標 done
+  if (streamingStages.value.length > 0) {
+    streamingStages.value = streamingStages.value.map((s) => ({ ...s, state: "done" }));
+  }
+}
 const currentAbortController = ref<AbortController | null>(null);
 const settingsOpen = ref(false);
 const scopeSyncState = ref<"loading" | "has" | "none" | "error">("loading");
@@ -178,6 +232,38 @@ function parseAnswerToCards(answer: string): RiskCard[] {
   });
 }
 
+/**
+ * 後端 extra.risk_cards（結構化）→ 前端 RiskCard。
+ * 與 backend/schemas/chat.RiskCard 對齊：riskLevel, title, clauseType, reasoning, suggestion…
+ */
+type BackendRiskCard = {
+  id?: string;
+  title?: string;
+  clauseType?: string | null;
+  riskLevel?: "high" | "medium" | "low";
+  riskLabel?: string | null;
+  reasoning?: string | null;
+  suggestion?: string | null;
+};
+
+function riskCardsFromExtra(extra: Record<string, unknown> | null | undefined): RiskCard[] {
+  if (!extra) return [];
+  const raw = (extra as { risk_cards?: unknown }).risk_cards;
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  return raw.map((item, idx) => {
+    const c = item as BackendRiskCard;
+    const title = (c.title || `條款 ${idx + 1}`).replace(/\*+/g, "").trim();
+    return {
+      id: c.id || `extra-${idx}`,
+      title,
+      summary: (c.reasoning || "").trim() || "請參閱右側法律助理的完整分析。",
+      suggestion: (c.suggestion || "").trim(),
+      severity: c.riskLevel || "low",
+      section: c.clauseType || c.riskLabel || `條款 ${idx + 1}`,
+    } satisfies RiskCard;
+  });
+}
+
 const riskCards = computed<RiskCard[]>(() => {
   const msg = latestContractAssistant.value;
   if (!msg) {
@@ -193,7 +279,11 @@ const riskCards = computed<RiskCard[]>(() => {
     ];
   }
 
-  // Try to parse structured answer first
+  // 1. 優先使用後端結構化資料（contract_risk_parser.parse_risk_cards 的輸出）
+  const fromExtra = riskCardsFromExtra(msg.extra);
+  if (fromExtra.length > 0) return fromExtra;
+
+  // 2. Fallback：LLM 格式未解析成功時，用舊版 regex parse markdown
   const parsed = parseAnswerToCards(msg.content);
   if (parsed.length > 0) return parsed;
 
@@ -384,6 +474,7 @@ async function sendMessage() {
   sending.value = true;
   chatError.value = null;
   streamingStatus.value = "正在分析問題類型...";
+  resetStreamingStages();
   railTab.value = "assistant";
 
   const body: ChatRequest = {
@@ -406,13 +497,14 @@ async function sendMessage() {
 
   try {
     await postChatStream(body, {
-      onStatus(message) {
-        streamingStatus.value = message;
+      onStatus({ stage, message }) {
+        handleStreamStatus(stage, message);
       },
       onToken(fragment) {
         if (!hasReceivedTokens) {
           hasReceivedTokens = true;
           streamingStatus.value = null;
+          finalizeStreamingStages();
         }
         conversation.appendStreamingToken(convId, fragment);
       },
@@ -422,9 +514,11 @@ async function sendMessage() {
       },
       onDone() {
         streamingStatus.value = null;
+        resetStreamingStages();
       },
       onAbort() {
         streamingStatus.value = null;
+        resetStreamingStages();
         // 已收到部分 token：保留已生成的內容，標記為中斷
         if (hasReceivedTokens) {
           conversation.finalizeStreamingMessage(convId, {});
@@ -434,6 +528,7 @@ async function sendMessage() {
       },
       onError(message) {
         streamingStatus.value = null;
+        resetStreamingStages();
         if (!hasReceivedTokens) {
           conversation.removeLastMessage(convId);
         }
@@ -443,6 +538,7 @@ async function sendMessage() {
     }, abortCtrl.signal);
   } catch (error) {
     streamingStatus.value = null;
+    resetStreamingStages();
     if (!hasReceivedTokens) {
       conversation.removeLastMessage(convId);
     }
@@ -454,6 +550,7 @@ async function sendMessage() {
   } finally {
     sending.value = false;
     streamingStatus.value = null;
+    resetStreamingStages();
     currentAbortController.value = null;
   }
 }
@@ -648,7 +745,30 @@ async function sendMessage() {
               </template>
 
               <!-- Streaming 狀態指示器 -->
-              <div v-if="streamingStatus" class="streaming-indicator">
+              <!-- 合約+法條流程：顯示 stepper；其他路徑：單行動畫點 -->
+              <div v-if="streamingStages.length > 0" class="streaming-stepper" role="status" aria-live="polite">
+                <ol class="stepper-list">
+                  <li
+                    v-for="stage in streamingStages"
+                    :key="stage.key"
+                    class="stepper-item"
+                    :class="`stepper-item--${stage.state}`"
+                  >
+                    <span class="stepper-icon" aria-hidden="true">
+                      <span v-if="stage.state === 'done'" class="stepper-check">✓</span>
+                      <span v-else-if="stage.state === 'active'" class="stepper-spinner" />
+                      <span v-else class="stepper-dot-empty" />
+                    </span>
+                    <span class="stepper-body">
+                      <span class="stepper-label">{{ stage.label }}</span>
+                      <span v-if="stage.state === 'active' && stage.message" class="stepper-message">
+                        {{ stage.message }}
+                      </span>
+                    </span>
+                  </li>
+                </ol>
+              </div>
+              <div v-else-if="streamingStatus" class="streaming-indicator">
                 <span class="streaming-dot" />
                 <span class="streaming-dot" />
                 <span class="streaming-dot" />
@@ -1336,5 +1456,95 @@ async function sendMessage() {
   color: #6366f1;
   font-weight: 600;
   margin-left: 4px;
+}
+
+/* ---------- SSE stage stepper（合約+法條流程專用） ---------- */
+.streaming-stepper {
+  margin: 18px 0 0;
+  padding: 14px 18px;
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 12px;
+}
+
+.stepper-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stepper-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 0.88rem;
+  color: #9ca3af;
+  transition: color 0.2s ease;
+}
+
+.stepper-item--active {
+  color: #4f46e5;
+  font-weight: 600;
+}
+
+.stepper-item--done {
+  color: #10b981;
+}
+
+.stepper-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stepper-check {
+  color: #10b981;
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.stepper-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(79, 70, 229, 0.25);
+  border-top-color: #4f46e5;
+  animation: stepper-spin 0.9s linear infinite;
+}
+
+.stepper-dot-empty {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #d1d5db;
+}
+
+.stepper-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stepper-label {
+  line-height: 1.4;
+}
+
+.stepper-message {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+@keyframes stepper-spin {
+  to { transform: rotate(360deg); }
 }
 </style>

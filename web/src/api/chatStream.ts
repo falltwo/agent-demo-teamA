@@ -22,9 +22,16 @@ function resolveApiBaseUrl(): string {
   return `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
 }
 
+export interface StreamStatusPayload {
+  /** 階段代碼，例如 contract_retrieve / law_search / contract_generate / routing / streaming */
+  stage: string;
+  /** 人類可讀訊息 */
+  message: string;
+}
+
 export interface StreamChatCallbacks {
   /** 收到 status 事件（路由/檢索/生成等階段提示） */
-  onStatus?: (message: string) => void;
+  onStatus?: (payload: StreamStatusPayload) => void;
   /** 收到 token fragment（增量文字片段，持續累加出完整回答） */
   onToken?: (fragment: string) => void;
   /** 收到 meta 事件（sources, chunks, tool_name 等最終資料） */
@@ -115,7 +122,10 @@ export async function postChatStream(
 
           switch (eventType) {
             case "status":
-              callbacks.onStatus?.(data.message || "");
+              callbacks.onStatus?.({
+                stage: String(data.stage || ""),
+                message: String(data.message || ""),
+              });
               break;
             case "token":
               callbacks.onToken?.(data.t || "");

@@ -157,6 +157,30 @@ export interface paths {
         get: operations["get_sources_api_v1_sources_get"];
         put?: never;
         post?: never;
+        /**
+         * Delete Source
+         * @description 從知識庫（BM25 語料 + Pinecone + 來源註冊表）刪除指定來源的所有向量。
+         */
+        delete: operations["delete_source_api_v1_sources_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Source
+         * @description 下載原始上傳檔案。
+         */
+        get: operations["download_source_api_v1_sources_download_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -356,7 +380,10 @@ export interface components {
             chunks: components["schemas"]["ChunkItem"][];
             /** Tool Name */
             tool_name: string;
-            /** Extra */
+            /**
+             * Extra
+             * @description Tool-specific metadata. 合約審閱路徑會帶 `risk_cards: list[RiskCard]`；其他 tool 可能帶 `asked_chart_confirmation` / `chart_query` 等欄位。
+             */
             extra?: {
                 [key: string]: unknown;
             } | null;
@@ -434,6 +461,12 @@ export interface components {
             results?: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Dropped Rows
+             * @description 讀取時因 JSON 解析失敗或非 dict 被丟棄的列數（僅供觀察）。
+             * @default 0
+             */
+            dropped_rows: number;
         };
         /**
          * EvalBatchListResponse
@@ -514,6 +547,12 @@ export interface components {
              * @default 500
              */
             limit: number;
+            /**
+             * Dropped Rows
+             * @description 讀取時因 JSON 解析失敗或結構不合法而被丟棄的列數（僅供前端/運維觀察）。
+             * @default 0
+             */
+            dropped_rows: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -925,6 +964,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourcesListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_source_api_v1_sources_delete: {
+        parameters: {
+            query: {
+                /** @description 完整 source 路徑（如 uploaded/<chat_id>/<filename>） */
+                source: string;
+                /** @description 對話 ID（選填） */
+                chat_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_source_api_v1_sources_download_get: {
+        parameters: {
+            query: {
+                /** @description 完整 source 路徑（如 uploaded/<chat_id>/<filename>） */
+                source: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
