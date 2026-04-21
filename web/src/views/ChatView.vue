@@ -46,6 +46,7 @@ const currentAbortController = ref<AbortController | null>(null);
 const settingsOpen = ref(false);
 const scopeSyncState = ref<"loading" | "has" | "none" | "error">("loading");
 const railTab = ref<RailTab>("risk");
+const railExpanded = ref(false);
 
 const sourceRows = ref<SourceRow[]>([]);
 const preview = ref<SourcePreviewResponse | null>(null);
@@ -473,7 +474,7 @@ async function sendMessage() {
       :scope-sync-state="scopeSyncState"
     />
 
-    <section class="review-workspace">
+    <section class="review-workspace" :class="{ 'review-workspace--rail-expanded': railExpanded }">
       <div class="document-frame ds-card">
         <header class="viewer-toolbar">
           <div class="viewer-toolbar__left">
@@ -539,7 +540,7 @@ async function sendMessage() {
         </div>
       </div>
 
-      <aside class="analysis-rail ds-card">
+      <aside class="analysis-rail ds-card" :class="{ 'analysis-rail--expanded': railExpanded }">
         <div class="rail-tabs">
           <button
             type="button"
@@ -556,6 +557,35 @@ async function sendMessage() {
             @click="railTab = 'assistant'"
           >
             Legal Assistant
+          </button>
+          <button
+            type="button"
+            class="rail-expand-btn"
+            :aria-label="railExpanded ? '收回面板' : '展開面板'"
+            @click="railExpanded = !railExpanded"
+          >
+            <svg
+              v-if="!railExpanded"
+              xmlns="http://www.w3.org/2000/svg"
+              width="16" height="16" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"
+            >
+              <!-- expand: arrows pointing outward -->
+              <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+              <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+            </svg>
+            <svg
+              v-else
+              xmlns="http://www.w3.org/2000/svg"
+              width="16" height="16" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"
+            >
+              <!-- collapse: arrows pointing inward -->
+              <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+              <line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/>
+            </svg>
           </button>
         </div>
 
@@ -865,11 +895,12 @@ async function sendMessage() {
   border: 1px solid #dbe6f2;
   border-radius: 16px;
   background: #ffffff;
+  transition: all 0.2s ease;
 }
 
 .rail-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr auto;
   border-bottom: 1px solid #dbe6f2;
 }
 
@@ -886,6 +917,28 @@ async function sendMessage() {
 .rail-tab--active {
   color: #102a43;
   box-shadow: inset 0 -3px 0 #102a43;
+}
+
+.rail-expand-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  border: none;
+  background: #ffffff;
+  color: #64748b;
+  cursor: pointer;
+  border-left: 1px solid #dbe6f2;
+  transition: background 0.15s, color 0.15s;
+}
+.rail-expand-btn:hover {
+  background: #f0f4f8;
+  color: #102a43;
+}
+
+/* Expanded rail: wider panel, document frame shrinks */
+.review-workspace--rail-expanded {
+  grid-template-columns: minmax(0, 1fr) 580px;
 }
 
 .rail-panel {
