@@ -39,49 +39,53 @@
 ```mermaid
 flowchart TD
     U([使用者輸入]) --> AR[Agent Router\nagent_router.py]
- 
-    %% 意圖偵測層（規則優先）
-    AR -->|規則偵測：合約+法條| CRL[合約+法條分析\ncontract_risk_with_law_search]
-    AR -->|規則偵測：合約審查| CRA[合約風險代理\nContractRiskAgent]
-    AR -->|LLM 決策其他意圖| TOOLS{工具選擇}
- 
-    TOOLS -->|RAG 知識庫| RAG[LangGraph RAG\nrag_graph.py]
-    TOOLS -->|研究模式| RES[RAG + Web 搜尋\nresearch]
-    TOOLS -->|財報/ESG/資料| EA[專家代理\nexpert_agents.py]
-    TOOLS -->|純網路搜尋\n不需知識庫語境| WS[Tavily 搜尋]
-    TOOLS -->|圖表分析\n不需知識庫語境| CH[ECharts 圖表\nanalyze_and_chart]
-    TOOLS -->|閒聊| ST[直接 LLM\nsmall_talk]
- 
-    %% RAG 是所有知識庫查詢的基礎
-    CRL --> RAG
-    CRA --> RAG
-    EA -->|領域前處理後\n財報格式化／ESG指標抽取| RAG
-    RES --> RAG
- 
-    %% 法條查詢是合約分析的子流程
-    CRL --> LS[法條搜尋\nTavily→judicial.gov.tw]
- 
+    %% 意圖偵測層：規則優先（intent_detector.py），無命中才交給 LLM 決策
+    AR --> ID{意圖偵測\nintent_detector.py}
+    ID -->|規則：合約+法條| CRL[合約+法條分析\ncontract_risk_with_law_search]
+    ID -->|規則：合約審閱| CRA[合約風險代理\nContractRiskAgent]
+    ID -->|規則：司法院查詢| TLW[tw_law_web_search\nTavily + judicial.gov.tw]
+    ID -->|規則無命中| LLMD{LLM 決策\nrouter}
+
+    LLMD -->|RAG 知識庫| RG[LangGraph RAG\nrag_graph.py]
+    LLMD -->|研究模式| RES[research\nRAG + Web]
+    LLMD -->|財報 / ESG / 資料| EA[專家代理\nexpert_agents.py]
+    LLMD -->|純網路搜尋\n不需知識庫語境| WS[web_search\nTavily]
+    LLMD -->|圖表分析\n不需知識庫語境| CH[analyze_and_chart\nECharts MCP]
+    LLMD -->|閒聊| ST[small_talk\n直接 LLM]
+
+    %% RAG 是所有知識庫查詢的共用基礎設施（非平行獨立路徑）
+    CRL -->|retrieve_only| RG
+    CRA -->|retrieve_only| RG
+    EA  -->|領域前處理後\n財報格式化／ESG指標抽取| RG
+    RES --> RG
+
+    %% 法條查詢是合約+法條流程的子步驟，三階段推送 SSE 進度
+    CRL -.子流程.-> LS[法條搜尋\nTavily → judicial.gov.tw\n並行查詢（最多 4 條）]
+    CRL -.progress.-> PG[SSE status\ncontract_retrieve → law_search → contract_generate]
+
     %% RAG 核心流程
-    RAG --> Q[Query 重寫] --> RET[混合檢索\nPinecone+BM25]
-    RET --> RK[MMR/LLM 重排序]
-    RK --> PKG[調查員打包]
-    PKG --> GEN[判官生成]
- 
+    RG --> Q[Query 重寫 + Multi-query\n（aux 並行 embedding+search）]
+    Q --> RET[Hybrid 檢索\nPinecone + BM25（jieba）]
+    RET --> RK[重排序\nMMR 預設 / LLM / none]
+    RK --> PKG[Investigator 打包證據]
+    PKG --> GEN[Judge 評估風險]
+
     %% 備援路徑
-    RAG -->|檢索無結果或信心值低| FB[備援\n提示補充資訊]
+    RG -->|檢索無結果或信心值低| FB[備援\n提示補充資訊]
     FB --> OUT
- 
-    %% AI 自檢（合約+法條模式）
+
+    %% AI 自檢（合約+法條模式，CONTRACT_RISK_SELF_CHECK_ENABLED=1 時）
     GEN --> CHK[AI 自檢\n驗證答案與來源一致性]
     CHK --> OUT
- 
+
     %% 純工具直接輸出
     LS --> OUT
     WS --> OUT
+    TLW --> OUT
     CH --> OUT
     ST --> OUT
- 
-    OUT([回答+引用來源+風險標注])
+
+    OUT([回答 + 引用來源 + 風險標注])
 ```
 
 ### LangGraph RAG 狀態機
@@ -89,10 +93,11 @@ flowchart TD
 ```mermaid
 stateDiagram-v2
     [*] --> retrieve : 使用者問題
-    retrieve --> rewrite : 需要 Query 擴展
+    retrieve --> rewrite : RAG_MULTI_QUERY=1
     retrieve --> rerank : 直接重排
-    rewrite --> rerank
-    rerank --> package : Investigator 整理證據
+    rewrite --> aux_parallel : 產生 aux queries
+    aux_parallel --> rerank : ThreadPool\n（RAG_AUX_QUERY_CONCURRENCY=4）
+    rerank --> package : Investigator 整理證據\n（RAG_RERANK_METHOD=mmr|llm|none）
     package --> generate : Judge 評估風險
     generate --> [*] : 回答 + 來源 + 風險標注
 ```
@@ -331,8 +336,8 @@ push 到 `main` 且 CI 全部通過後，GitHub Actions 透過 Tailscale SSH 自
 | 後端 | FastAPI、Pydantic Settings、Uvicorn |
 | 前端 | Vue 3、Vite、Pinia、Vue Router |
 | Demo UI | Streamlit |
-| AI / RAG | LangGraph、Pinecone、BM25、Ollama、Google Gemini |
-| 外部工具 | Tavily、Firecrawl、Groq |
+| AI / RAG | LangGraph、Pinecone、BM25（jieba）、Ollama、Google Gemini |
+| 外部工具 | Tavily（法條 / 網路搜尋）、Groq、Firecrawl（選配，網頁擷取） |
 | 測試 | pytest、Playwright |
 | CI/CD | GitHub Actions + Tailscale SSH |
 
