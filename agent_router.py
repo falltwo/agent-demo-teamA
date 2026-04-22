@@ -223,32 +223,62 @@ def _contract_risk_with_law_search_impl(
     emit_progress("contract_retrieve", "正在檢索合約內容…")
 
     # 若前端指定了目前預覽的文件，直接從 BM25 語料庫按來源路徑取 chunks
+    # 若前端指定了目前預覽的文件，直接從 BM25 語料庫按來源路徑取 chunks
     # 不靠語意搜尋，避免多份合約混雜
     if active_source:
         try:
-            from rag_common import load_bm25_corpus
+            from rag_common import load_bm25_corpus, build_bm25_index, _bm25_tokenize
+            import numpy as np
             corpus = load_bm25_corpus()
             source_rows = sorted(
                 [r for r in corpus if str(r.get("source", "")) == active_source],
                 key=lambda r: int(r.get("chunk_index", 0)),
             )
             if source_rows:
+                # BM25 relevance 排序：對問題最相關的 chunks 優先，再按原始順序重排
+                # 解決「截斷只取前段」問題：改為取全合約中最重要的條款
+                _MAX_RAG_CHARS = int(os.getenv("CONTRACT_RAG_MAX_CHARS", "16000"))
+                context_rag_full = "\n\n".join(
+                    f"[{r['source']}#chunk{r['chunk_index']}]\n{r.get('text','').strip()}"
+                    for r in source_rows if r.get("text", "").strip()
+                )
+                if len(context_rag_full) <= _MAX_RAG_CHARS:
+                    # 合約夠短，全部放入
+                    selected_rows = source_rows
+                else:
+                    # 合約較長：用 BM25 選最相關 chunks，再按原始順序排列
+                    try:
+                        bm25_obj, _, _ = build_bm25_index(source_rows)
+                        q_tokens = _bm25_tokenize(question)
+                        scores = bm25_obj.get_scores(q_tokens) if (bm25_obj and q_tokens) else []
+                        if len(scores) == len(source_rows):
+                            ranked_idx = list(np.argsort(scores)[::-1])
+                        else:
+                            ranked_idx = list(range(len(source_rows)))
+                        # 貪婪選取：依 relevance 順序加入，直到字元上限
+                        selected_idx = set()
+                        running_chars = 0
+                        for idx in ranked_idx:
+                            t = (source_rows[idx].get("text") or "").strip()
+                            if running_chars + len(t) > _MAX_RAG_CHARS:
+                                break
+                            selected_idx.add(idx)
+                            running_chars += len(t)
+                        # 保持原始條文順序
+                        selected_rows = [source_rows[i] for i in sorted(selected_idx)]
+                        logger.info(
+                            "active_source BM25 selection: %d/%d chunks kept (%d chars)",
+                            len(selected_rows), len(source_rows), running_chars,
+                        )
+                    except Exception as bm25_exc:
+                        logger.warning("BM25 relevance sort failed (%s), using sequential truncation", bm25_exc)
+                        selected_rows = source_rows
+
                 chunks_rag = [
                     {"tag": f"{r['source']}#chunk{r['chunk_index']}", "text": str(r.get("text", "")).strip()}
-                    for r in source_rows
-                    if str(r.get("text", "")).strip()
+                    for r in selected_rows if str(r.get("text", "")).strip()
                 ]
-                # 限制 context 上限避免超出模型 context window 導致 prefill 極慢
-                # 12000 字 ≈ 4000 tokens，留空間給 system prompt + law results + 回應
-                _MAX_RAG_CHARS = int(os.getenv("CONTRACT_RAG_MAX_CHARS", "12000"))
-                context_rag_full = "\n\n".join(f"[{c['tag']}]\n{c['text']}" for c in chunks_rag)
-                if len(context_rag_full) > _MAX_RAG_CHARS:
-                    context_rag = context_rag_full[:_MAX_RAG_CHARS] + "\n\n…（合約後續內容已截斷，上方為前段條款）"
-                    logger.info(
-                        "active_source context truncated: %d → %d chars", len(context_rag_full), _MAX_RAG_CHARS
-                    )
-                else:
-                    context_rag = context_rag_full
+                context_rag = "\n\n".join(f"[{c['tag']}]\n{c['text']}" for c in chunks_rag)
                 sources_rag: List[str] = [active_source]
                 logger.info("active_source direct load: %d chunks from %s", len(chunks_rag), active_source)
             else:
@@ -267,45 +297,45 @@ def _contract_risk_with_law_search_impl(
             [],
         )
 
-    law_refs = _extract_law_refs_from_text(context_rag)
     law_sections: List[str] = []
     web_urls: List[str] = []
 
-    # 並行查詢各法條，避免循序等待
-    def _search_one(ref: str) -> Tuple[str, str, List[str]]:
-        q = f"{ref} site:judicial.gov.tw"
-        block, urls = _web_search_with_urls(q, max_results=3)
-        return ref, block, urls
+    # 法條外部搜尋：預設關閉（Ollama 環境下 Tavily + LLM 合計常超時）
+    # 需要法條引用時可在 .env 設 LAW_SEARCH_ENABLED=1 開啟
+    law_search_enabled = os.getenv("LAW_SEARCH_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+    if law_search_enabled:
+        law_refs = _extract_law_refs_from_text(context_rag)
 
-    queries_to_run: List[str] = list(law_refs) if law_refs else []
-    if not queries_to_run:
-        # 合約未明確引用法條，用固定的合約法律後備查詢（避免把問題原文送出去造成不相關結果）
-        queries_to_run = ["企業IT採購合約 民法承攬 驗收 違約責任 site:judicial.gov.tw"]
+        def _search_one(ref: str) -> Tuple[str, str, List[str]]:
+            q = f"{ref} site:judicial.gov.tw"
+            block, urls = _web_search_with_urls(q, max_results=3)
+            return ref, block, urls
 
-    if law_refs:
-        emit_progress(
-            "law_search",
-            f"擷取到 {len(law_refs)} 筆法條引用，並行搜尋司法院…",
-        )
+        queries_to_run: List[str] = list(law_refs) if law_refs else [
+            "企業IT採購合約 民法承攬 驗收 違約責任 site:judicial.gov.tw"
+        ]
+        if law_refs:
+            emit_progress("law_search", f"擷取到 {len(law_refs)} 筆法條引用，並行搜尋司法院…")
+        else:
+            emit_progress("law_search", "合約未明示法條，依問題推導相關法規搜尋…")
+
+        _LAW_SEARCH_TIMEOUT = int(os.getenv("LAW_SEARCH_TIMEOUT_SEC", "8"))
+        with ThreadPoolExecutor(max_workers=min(len(queries_to_run), 4)) as pool:
+            futures = {pool.submit(_search_one, q): q for q in queries_to_run}
+            try:
+                for fut in as_completed(futures, timeout=_LAW_SEARCH_TIMEOUT):
+                    try:
+                        ref, block, urls = fut.result()
+                        if block and "無法使用網路搜尋" not in block:
+                            label = ref if ref in (law_refs or []) else "相關法規與實務"
+                            law_sections.append(f"### {label}\n{block}")
+                            web_urls.extend(urls)
+                    except Exception as exc:
+                        logger.warning("law search failed: %s", exc)
+            except Exception:
+                logger.warning("law search timed out after %ds, skipping", _LAW_SEARCH_TIMEOUT)
     else:
-        emit_progress("law_search", "合約未明示法條，依問題推導相關法規搜尋…")
-
-    # 法條搜尋設 8 秒整體 timeout，超時直接跳過，不影響合約分析主流程
-    _LAW_SEARCH_TIMEOUT = int(os.getenv("LAW_SEARCH_TIMEOUT_SEC", "8"))
-    with ThreadPoolExecutor(max_workers=min(len(queries_to_run), 4)) as pool:
-        futures = {pool.submit(_search_one, q): q for q in queries_to_run}
-        try:
-            for fut in as_completed(futures, timeout=_LAW_SEARCH_TIMEOUT):
-                try:
-                    ref, block, urls = fut.result()
-                    if block and "無法使用網路搜尋" not in block:
-                        label = ref if ref in law_refs else "相關法規與實務"
-                        law_sections.append(f"### {label}\n{block}")
-                        web_urls.extend(urls)
-                except Exception as exc:
-                    logger.warning("law search failed: %s", exc)
-        except Exception:
-            logger.warning("law search timed out after %ds, proceeding without external law refs", _LAW_SEARCH_TIMEOUT)
+        emit_progress("law_search", "依合約條文進行法務風險評估…")
 
     crawl_law_text = ""  # Firecrawl 爬蟲已停用（速度考量）
 
