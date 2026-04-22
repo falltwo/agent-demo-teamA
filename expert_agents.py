@@ -217,6 +217,100 @@ CONTRACT_RISK_ADVISOR_SYSTEM = (
 )
 
 
+# ---------- 驗證修正器：合約分析自動校正（Verification Pass）----------
+
+_CONTRACT_VERIFY_SYSTEM = """你是一位合約分析「事實驗證員」。
+你會收到兩份內容：
+1. 【草稿分析】：AI 產出的合約風險評估初稿
+2. 【合約原文】：完整的合約檢索內容
+
+你的唯一任務是**逐條核查草稿中的每一個聲明是否與合約原文吻合，並直接修正錯誤**。
+輸出格式與草稿完全相同，只改錯誤的地方，不添加任何說明性文字。
+
+## 必須強制執行的四項核查規則
+
+### 規則 A：量化標準不得標為模糊
+若草稿聲稱「X 計算方式模糊」或「X 未明確定義」，先在合約原文中搜尋 X 相關段落。
+- 若原文已給出百分比、時間數字、明確例外清單 → **必須刪除「模糊」的說法**，改為分析該標準的嚴苛程度或操作風險。
+- 範例錯誤：「SLA 計算方式模糊，未明確例外情況」→ 若原文已載明 99.5%＋72小時前通知排除＋不可抗力排除，則必須改寫。
+
+### 規則 B：建議前需確認功能是否已存在
+若草稿在【修改建議】中出現「建議加入 X」、「建議增加 X」、「建議補充 X 條款」等字樣，先在合約原文全文搜尋 X 相關功能。
+- 若原文已有明文涵蓋 → **必須改寫為**「第 X 條已涵蓋此功能，建議確認現有措辭是否足夠具體」，不得說「加入」。
+- 範例錯誤：建議加入「實際損害賠償條款」→ 若原文第五條第5項已載明「懲罰性違約金，並賠償實際損害」，則必須改寫。
+
+### 規則 C：定義已存在者不得說「缺乏定義」
+若草稿稱「S1/S2/S3/S4 缺乏清楚定義」或「缺陷等級由甲方主觀認定」，先在合約原文找定義表。
+- 若原文有 S1～S4 的定義條款 → **必須引述定義內容**，改為分析各等級的門檻是否合理，不得說「缺乏定義」。
+
+### 規則 D：聲稱「合約未載明」須確認
+若草稿任何處聲稱「合約未載明 Y」、「合約未規定 Y」，先全文搜尋 Y。
+- 若原文有 Y 相關條款 → **必須引述原文段落**並修正聲明為「合約已載明：…，風險在於…」。
+- 若原文真的沒有 → 保留原聲明不動。
+
+## 輸出規則
+- 直接輸出修正後的完整分析，保持原有的條款結構、【風險等級】【法務實務推演】【修改建議】格式
+- 不在輸出中說明「我修正了第X條的哪個部分」
+- 不添加任何序言或後記
+- 如果草稿完全正確、無需修改，原文輸出即可"""
+
+
+def verify_and_correct_analysis(
+    draft_answer: str,
+    contract_full_text: str,
+    llm_client: Any = None,
+    model: str | None = None,
+    timeout_kwargs: dict | None = None,
+) -> str:
+    """驗證並修正合約風險分析草稿中的事實錯誤。
+
+    對草稿中每一個「模糊聲稱」、「缺少建議」、「定義不足聲稱」進行原文核查，
+    直接修正錯誤並回傳完整的修正後分析（非附加報告）。
+
+    Args:
+        draft_answer: 第一次 LLM 輸出的草稿分析
+        contract_full_text: 合約全文（context_rag），供驗證員核查
+        llm_client: 已初始化的 genai 客戶端（若為 None 則自行初始化）
+        model: 模型名稱（若為 None 則使用預設）
+        timeout_kwargs: 額外的 timeout 參數 dict
+
+    Returns:
+        修正後的完整分析文字。驗證失敗時回傳原始草稿。
+    """
+    if not draft_answer or not contract_full_text:
+        return draft_answer
+
+    if llm_client is None or model is None:
+        _client, _model = _init_llm()
+        llm_client = llm_client or _client
+        model = model or _model
+
+    verify_prompt = (
+        "## 草稿分析（待核查）\n\n"
+        + draft_answer
+        + "\n\n## 合約原文（核查依據，以下為完整合約內容）\n\n"
+        + contract_full_text
+        + "\n\n請依上述四項規則核查草稿，輸出修正後的完整分析："
+    )
+
+    try:
+        kw = timeout_kwargs or {}
+        out = llm_client.models.generate_content(
+            model=model,
+            contents=verify_prompt,
+            config=types.GenerateContentConfig(system_instruction=_CONTRACT_VERIFY_SYSTEM),
+            **kw,
+        )
+        corrected = (out.text or "").strip()
+        return corrected if corrected else draft_answer
+    except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "verify_and_correct_analysis failed, returning original draft", exc_info=True
+        )
+        return draft_answer
+
+
 def contract_risk_agent(
     question: str,
     top_k: int = 8,

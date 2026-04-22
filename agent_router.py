@@ -20,6 +20,7 @@ from expert_agents import (
     data_analyst_agent,
     esg_agent,
     financial_report_agent,
+    verify_and_correct_analysis,
 )
 from echarts_tools import create_chart_option
 from contract_risk_parser import parse_risk_cards
@@ -239,6 +240,7 @@ def _contract_risk_with_law_search_impl(
                     if str(r.get("text", "")).strip()
                 ]
                 context_rag = "\n\n".join(f"[{c['tag']}]\n{c['text']}" for c in chunks_rag)
+                sources_rag: List[str] = [active_source]
                 logger.info("active_source direct load: %d chunks from %s", len(chunks_rag), active_source)
             else:
                 logger.warning("active_source %s not found in corpus, falling back to RAG", active_source)
@@ -340,42 +342,22 @@ def _contract_risk_with_law_search_impl(
     )
     answer = (out.text or "").strip()
 
-    # 多一層 AI 自檢：以「回答＋來源摘要」請 LLM 驗證是否與來源一致
-    # 預設關閉以節省延遲（多一次 LLM 調用，合約+法條路徑總耗時可降 5-10 秒）
-    # 需要嚴格品檢時設 CONTRACT_RISK_SELF_CHECK_ENABLED=1
-    self_check_enabled = os.getenv("CONTRACT_RISK_SELF_CHECK_ENABLED", "").strip().lower() in ("1", "true", "yes")
-    if self_check_enabled:
+    # 驗證修正通道（Verification Pass）：對草稿進行事實核查並直接修正錯誤
+    # 預設開啟；設 CONTRACT_RISK_VERIFY_ENABLED=0 可關閉（節省約 15-25 秒）
+    verify_enabled = os.getenv("CONTRACT_RISK_VERIFY_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+    if verify_enabled and answer:
         try:
-            context_for_check = context_rag[:4500] + ("…" if len(context_rag) > 4500 else "")
-            law_joined = "\n".join(law_sections) if law_sections else ""
-            law_for_check = (law_joined[:3500] + ("…" if len(law_joined) > 3500 else "")) if law_joined else "（無外部法條內容）"
-            verify_system = (
-                "你是品質檢核員，只根據「風險評估回答」與「合約檢索摘要」「法條摘要」做一致性檢查。\n"
-                "請用以下結構產出簡短自檢結果（每項一至三句話為限）：\n"
-                "**1. 與合約檢索內容一致性**：回答中的條款描述、chunk 引用是否與合約摘要相符？若有未對應到來源的敘述請註明。\n"
-                "**2. 與法條／實務見解一致性**：回答中引用的法條或實務見解是否與下方法條摘要一致？有無過度推論或與法條明顯矛盾之處？\n"
-                "**3. 建議人工再確認之處**：列出建議法務或使用者再核對的項目（例如：具體金額、條號、責任歸屬）。\n"
-                "**4. 具體建議**：給出 1～3 條可執行的後續建議（例如：建議委請律師審閱某條、建議與對方確認某事項、建議補充查詢某法規）。\n"
-                "若整體一致、無明顯矛盾，也請簡要說明。禁止輸出與自檢無關的內容。"
-            )
-            verify_prompt = (
-                "## 風險評估回答（待驗證）\n\n" + (answer[:6000] + "…" if len(answer) > 6000 else answer)
-                + "\n\n## 合約檢索內容摘要（供對照）\n\n" + context_for_check
-                + "\n\n## 法條／實務見解摘要（供對照）\n\n" + law_for_check
-                + "\n\n請依指示產出上述自檢結果："
-            )
-            verify_out = client.models.generate_content(
+            emit_progress("contract_verify", "🔍 正在交叉驗證分析結果，核查事實錯誤…")
+            answer = verify_and_correct_analysis(
+                draft_answer=answer,
+                contract_full_text=context_rag,
+                llm_client=client,
                 model=contract_verify_model,
-                contents=verify_prompt,
-                config=types.GenerateContentConfig(system_instruction=verify_system),
-                **_timeout_kwargs(client, "contract_risk_verify"),
+                timeout_kwargs=_timeout_kwargs(client, "contract_risk_verify"),
             )
-            verify_text = (verify_out.text or "").strip()
-            if verify_text:
-                answer += "\n\n---\n\n**【AI 自檢】**\n\n" + verify_text + "\n\n*以上自檢僅供參考，不取代人工覆核與律師意見。*"
+            logger.info("contract_risk_with_law_search: verification pass completed")
         except Exception as e:
-            logger.warning("contract_risk_with_law_search: AI 自檢步驟失敗，略過: %s", e, exc_info=True)
-            answer += "\n\n---\n\n**【AI 自檢】**\n（本次自檢未執行或執行失敗，建議人工核對上述內容與來源。）"
+            logger.warning("contract_risk_with_law_search: verification pass failed, using draft: %s", e, exc_info=True)
 
     # 文末一律附加免責聲明，確保可見且不被遺漏
     if _CONTRACT_DISCLAIMER not in answer:
