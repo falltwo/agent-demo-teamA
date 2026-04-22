@@ -300,9 +300,8 @@ def _contract_risk_with_law_search_impl(
     law_sections: List[str] = []
     web_urls: List[str] = []
 
-    # 法條外部搜尋：預設關閉（Ollama 環境下 Tavily + LLM 合計常超時）
-    # 需要法條引用時可在 .env 設 LAW_SEARCH_ENABLED=1 開啟
-    law_search_enabled = os.getenv("LAW_SEARCH_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+    # 法條外部搜尋：預設開啟，有 8 秒 timeout 保護；設 LAW_SEARCH_ENABLED=0 可關閉
+    law_search_enabled = os.getenv("LAW_SEARCH_ENABLED", "1").strip().lower() not in ("0", "false", "no")
     if law_search_enabled:
         law_refs = _extract_law_refs_from_text(context_rag)
 
