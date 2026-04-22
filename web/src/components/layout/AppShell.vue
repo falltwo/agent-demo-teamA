@@ -10,6 +10,7 @@ import { useConversationStore } from "@/stores/conversation";
 import { isAssistantMessage } from "@/types/conversation";
 import { parseSourceRow } from "@/utils/sourceEntry";
 import { syncRagScopeFromSourcesForChat } from "@/utils/syncRagScopeFromSources";
+import EmptyState from "@/components/common/EmptyState.vue";
 
 type LibraryDoc = {
   id: string;
@@ -28,9 +29,11 @@ const uploadDocs = ref<LibraryDoc[]>([]);
 const uploadInput = ref<HTMLInputElement | null>(null);
 const uploadBusy = ref(false);
 const deletingId = ref<string | null>(null);
-const confirmDeleteId = ref<string | null>(null);
 const collapsedRecent = ref(false);
 const collapsedIndexed = ref(false);
+
+const deleteModalOpen = ref(false);
+const itemToDelete = ref<{ id: string, title: string, type: 'chat' | 'doc', doc?: LibraryDoc } | null>(null);
 
 const isFrontWorkspace = computed(() => !IS_ADMIN_TARGET);
 
@@ -184,33 +187,35 @@ function openIndexedDoc(doc: LibraryDoc) {
   });
 }
 
-function requestDeleteConversation(event: Event, chatId: string) {
+function requestDeleteConversation(event: Event, chatId: string, title: string) {
   event.stopPropagation();
-  // 第一次點：進入確認狀態；第二次點：執行刪除
-  if (confirmDeleteId.value === chatId) {
-    confirmDeleteId.value = null;
-    conversation.deleteConversation(chatId);
-  } else {
-    confirmDeleteId.value = chatId;
-  }
+  itemToDelete.value = { id: chatId, title, type: 'chat' };
+  deleteModalOpen.value = true;
 }
 
-function cancelConfirm(event: Event) {
-  event.stopPropagation();
-  confirmDeleteId.value = null;
+function cancelDelete() {
+  deleteModalOpen.value = false;
+  itemToDelete.value = null;
 }
 
-async function requestDeleteIndexedDoc(event: Event, doc: LibraryDoc) {
+function requestDeleteIndexedDoc(event: Event, doc: LibraryDoc) {
   event.stopPropagation();
-  if (deletingId.value) {
-    return;
-  }
-  // 第一次點：進入確認狀態；第二次點：執行刪除
-  if (confirmDeleteId.value === doc.id) {
-    confirmDeleteId.value = null;
-    deletingId.value = doc.id;
+  if (deletingId.value) return;
+  itemToDelete.value = { id: doc.id, title: doc.title, type: 'doc', doc };
+  deleteModalOpen.value = true;
+}
+
+async function confirmDelete() {
+  if (!itemToDelete.value) return;
+  const { id, type, doc } = itemToDelete.value;
+  deleteModalOpen.value = false;
+
+  if (type === 'chat') {
+    conversation.deleteConversation(id);
+  } else if (type === 'doc' && doc) {
+    deletingId.value = id;
     try {
-      await deleteSource(doc.source ?? doc.title, doc.chatId, { showLoading: false });
+      await deleteSource(doc.source ?? doc.title, doc.chatId, { showLoading: true });
       await loadLibrary();
       pushToast({ variant: "info", message: `已從知識庫刪除「${doc.title}」。` });
     } catch (error) {
@@ -221,9 +226,8 @@ async function requestDeleteIndexedDoc(event: Event, doc: LibraryDoc) {
     } finally {
       deletingId.value = null;
     }
-  } else {
-    confirmDeleteId.value = doc.id;
   }
+  itemToDelete.value = null;
 }
 
 async function loadLibrary() {
@@ -342,34 +346,33 @@ onMounted(() => {
               v-for="doc in filteredRecentDocs"
               :key="doc.id"
               class="doc-node-wrap"
-              :class="{ 'doc-node-wrap--confirm': confirmDeleteId === (doc.chatId || doc.id) }"
             >
               <button
                 type="button"
                 class="doc-node"
                 :class="{ 'doc-node--active': conversation.activeConversationId === doc.chatId && route.path === '/chat' }"
-                @click="confirmDeleteId === (doc.chatId || doc.id) ? cancelConfirm($event) : openRecentConversation(doc.chatId || doc.id)"
+                @click="openRecentConversation(doc.chatId || doc.id)"
               >
                 <span class="doc-node__icon" aria-hidden="true"></span>
                 <span class="doc-node__title">{{ doc.title }}</span>
                 <span class="doc-node__dot" :class="`doc-node__dot--${latestRiskTone(doc.chatId)}`"></span>
               </button>
               <button
-                v-if="confirmDeleteId === (doc.chatId || doc.id)"
-                type="button"
-                class="doc-node__del doc-node__del--confirm"
-                title="確認刪除"
-                @click.stop="requestDeleteConversation($event, doc.chatId || doc.id)"
-              >確認</button>
-              <button
-                v-else
                 type="button"
                 class="doc-node__del"
                 title="刪除對話"
-                @click.stop="requestDeleteConversation($event, doc.chatId || doc.id)"
-              >✕</button>
+                @click.stop="requestDeleteConversation($event, doc.chatId || doc.id, doc.title)"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
             </div>
-            <p v-if="filteredRecentDocs.length === 0" class="doc-empty">尚無最近審閱紀錄。</p>
+            <div v-if="filteredRecentDocs.length === 0" class="sidebar-empty">
+              <EmptyState
+                icon='<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>'
+                title="尚無對話"
+                description="點擊右上角的「+」建立新對話"
+              />
+            </div>
           </div>
         </section>
 
@@ -389,36 +392,36 @@ onMounted(() => {
               v-for="doc in filteredIndexedDocs"
               :key="doc.id"
               class="doc-node-wrap"
-              :class="{ 'doc-node-wrap--confirm': confirmDeleteId === doc.id }"
             >
               <button
                 type="button"
                 class="doc-node"
                 :disabled="deletingId === doc.id"
-                @click="confirmDeleteId === doc.id ? cancelConfirm($event) : openIndexedDoc(doc)"
+                @click="openIndexedDoc(doc)"
               >
                 <span class="doc-node__icon" aria-hidden="true"></span>
                 <span class="doc-node__title">{{ deletingId === doc.id ? "刪除中…" : doc.title }}</span>
                 <span class="doc-node__dot" :class="`doc-node__dot--${latestRiskTone(doc.chatId)}`"></span>
               </button>
               <button
-                v-if="confirmDeleteId === doc.id"
-                type="button"
-                class="doc-node__del doc-node__del--confirm"
-                title="確認從知識庫刪除"
-                :disabled="deletingId === doc.id"
-                @click.stop="requestDeleteIndexedDoc($event, doc)"
-              >確認</button>
-              <button
-                v-else
                 type="button"
                 class="doc-node__del doc-node__del--danger"
                 title="從知識庫刪除文件"
                 :disabled="deletingId === doc.id"
                 @click.stop="requestDeleteIndexedDoc($event, doc)"
-              >🗑</button>
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
             </div>
-            <p v-if="filteredIndexedDocs.length === 0" class="doc-empty">找不到符合條件的文件。</p>
+            <div v-if="filteredIndexedDocs.length === 0" class="sidebar-empty">
+              <EmptyState
+                icon='<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>'
+                title="尚無文件"
+                description="點擊「上傳」按鈕加入文件"
+                actionLabel="前往上傳"
+                @action="triggerUploadPicker"
+              />
+            </div>
           </div>
         </section>
 
@@ -448,11 +451,104 @@ onMounted(() => {
       <div class="main-inner">
         <slot />
       </div>
+
+      <div v-if="deleteModalOpen" class="modal-overlay" @click="cancelDelete">
+        <div class="modal" @click.stop>
+          <div class="modal-header">
+            <h3>刪除確認</h3>
+          </div>
+          <div class="modal-body">
+            您確定要刪除「<strong>{{ itemToDelete?.title }}</strong>」嗎？此操作無法復原。
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn-cancel" @click="cancelDelete">取消</button>
+            <button type="button" class="btn-danger" @click="confirmDelete">確認刪除</button>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 </template>
 
 <style scoped>
+.sidebar-empty {
+  transform: scale(0.85);
+  transform-origin: top center;
+  margin: -10px 0;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  background: white;
+  border-radius: 12px;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #0f172a;
+}
+
+.modal-body {
+  padding: 20px;
+  font-size: 0.95rem;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.modal-footer {
+  padding: 16px 20px;
+  background: #f8fafc;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.btn-cancel {
+  padding: 8px 16px;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-danger {
+  padding: 8px 16px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-danger:hover {
+  background: #b91c1c;
+}
 .shell {
   display: grid;
   grid-template-columns: 244px minmax(0, 1fr);
@@ -936,16 +1032,11 @@ onMounted(() => {
   border-radius: 6px;
   background: transparent;
   color: #94a3b8;
-  font-size: 0.72rem;
   cursor: pointer;
-  opacity: 0;
+  opacity: 1; /* Always visible */
   z-index: 2;
   transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
   flex-shrink: 0;
-}
-
-.doc-node-wrap:hover .doc-node__del {
-  opacity: 1;
 }
 
 .doc-node__del:hover {

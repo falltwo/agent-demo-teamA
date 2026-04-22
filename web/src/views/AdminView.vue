@@ -21,6 +21,7 @@ import {
 import { postIngestUpload } from "@/api/ingest";
 import { getSources } from "@/api/sources";
 import ApiErrorBlock from "@/components/ui/ApiErrorBlock.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
 import { pushToast } from "@/state/toast";
 import type {
   EvalBatchDetailResponse,
@@ -516,9 +517,11 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
         </button>
       </div>
       <ApiErrorBlock v-if="modelsError" :error="modelsError" title="Ollama 查詢失敗" />
-      <div v-else-if="modelRows.length === 0" class="empty">
-        目前沒有可顯示的模型。
-      </div>
+      <EmptyState
+        v-else-if="modelRows.length === 0"
+        title="目前沒有模型"
+        description="Ollama 尚未下載任何模型，或服務未啟動。"
+      />
       <table v-else class="table">
         <thead>
           <tr>
@@ -556,9 +559,11 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
         <strong>{{ dockerEngineAvailable == null ? "未知" : dockerEngineAvailable ? "可用" : "不可用" }}</strong>
       </p>
       <ApiErrorBlock v-if="dockerError" :error="dockerError" title="Docker 查詢失敗" />
-      <div v-else-if="dockerRows.length === 0" class="empty">
-        目前沒有執行中的容器。
-      </div>
+      <EmptyState
+        v-else-if="dockerRows.length === 0"
+        title="無容器執行中"
+        description="目前 Docker 中沒有任何相關容器。"
+      />
       <table v-else class="table">
         <thead>
           <tr>
@@ -602,9 +607,11 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
         </div>
       </div>
       <ApiErrorBlock v-if="sourcesError" :error="sourcesError" title="知識來源查詢失敗" />
-      <div v-else-if="sourceRows.length === 0" class="empty">
-        目前沒有來源資料。
-      </div>
+      <EmptyState
+        v-else-if="sourceRows.length === 0"
+        title="空空如也"
+        description="尚未建立任何知識來源資料。"
+      />
       <table v-else class="table">
         <thead>
           <tr>
@@ -713,7 +720,11 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
           </tr>
         </tbody>
       </table>
-      <p v-else class="empty">目前沒有線上 EVAL 紀錄。</p>
+      <EmptyState
+        v-else
+        title="查無紀錄"
+        description="目前沒有任何線上 EVAL 紀錄。"
+      />
 
       <div class="section-head">
         <h3 class="sub-title">批次執行</h3>
@@ -744,7 +755,11 @@ void Promise.all([refreshInfrastructure(), loadSources(), refreshEvalAll()]);
           重新載入明細
         </button>
       </div>
-      <p v-else class="empty">目前沒有批次執行紀錄。</p>
+      <EmptyState
+        v-else
+        title="無批次執行"
+        description="目前沒有任何批次執行紀錄。"
+      />
 
       <ApiErrorBlock v-if="detailError" :error="detailError" title="批次明細查詢失敗" />
       <div v-else-if="batchDetail" class="result-box">

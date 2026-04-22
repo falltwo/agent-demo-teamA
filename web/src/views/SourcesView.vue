@@ -2,9 +2,10 @@
 import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 
-import ApiErrorBlock from "@/components/ui/ApiErrorBlock.vue";
 import { ApiError } from "@/api/client";
 import { getSources } from "@/api/sources";
+import ApiErrorBlock from "@/components/ui/ApiErrorBlock.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
 import { pushToast } from "@/state/toast";
 import { useConversationStore } from "@/stores/conversation";
 import { parseSourceRow } from "@/utils/sourceEntry";
@@ -135,9 +136,14 @@ watch(
         />
       </div>
 
-      <div v-else-if="rows.length === 0" class="empty">
-        尚無來源紀錄，或篩選條件下無資料。
-      </div>
+      <EmptyState
+        v-else-if="rows.length === 0"
+        icon='<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>'
+        title="尚無來源紀錄"
+        description="或者在目前的篩選條件下找不到資料。您可以前往上傳區將文件加入知識庫。"
+        action-label="前往上傳"
+        @action="$router.push('/upload')"
+      />
 
       <table v-else class="table">
         <thead>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, reactive, ref, watch } from "vue";
 import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 import ChunkOriginalPopover from "./ChunkOriginalPopover.vue";
 import HighRiskCompareModal from "./HighRiskCompareModal.vue";
@@ -49,7 +50,7 @@ function linkLawRefs(html: string): string {
 
 function mdToHtml(src: string): string {
   const html = marked(src, { async: false }) as string;
-  return linkLawRefs(html);
+  return DOMPurify.sanitize(linkLawRefs(html));
 }
 
 const split = computed(() => splitAnswerAndRefs(props.message.content));

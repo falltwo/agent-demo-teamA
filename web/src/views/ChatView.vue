@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 import { postChatStream } from "@/api/chatStream";
 import { downloadSource, getSourcePreview, getSources, type SourcePreviewResponse } from "@/api/sources";
@@ -105,9 +106,10 @@ const railExpanded = ref(false);
 const sourceRows = ref<SourceRow[]>([]);
 const preview = ref<SourcePreviewResponse | null>(null);
 const previewLoading = ref(false);
-const currentPreviewPage = ref(0);
 const assistantFeedEl = ref<HTMLElement | null>(null);
 const stickToBottom = ref(true);
+
+const riskFilter = ref<"all" | "high" | "action">("all");
 
 const activeConversation = computed(() => conversation.activeConversation);
 
@@ -151,41 +153,37 @@ const previewParagraphs = computed(() => {
   return text
     .split(/\n{2,}/)
     .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, 36);
+    .filter(Boolean);
 });
-
-const previewPages = computed(() => {
-  const pageSize = 5;
-  const pages: string[][] = [];
-  for (let index = 0; index < previewParagraphs.value.length; index += pageSize) {
-    pages.push(previewParagraphs.value.slice(index, index + pageSize));
-  }
-  return pages;
-});
-
-const activePreviewPageParagraphs = computed(() => {
-  if (previewPages.value.length === 0) {
-    return [];
-  }
-  const safeIndex = Math.min(currentPreviewPage.value, previewPages.value.length - 1);
-  return previewPages.value[safeIndex] ?? [];
-});
-
-const pageLabel = computed(() => {
-  const total = Math.max(1, previewPages.value.length);
-  return `Page ${Math.min(currentPreviewPage.value + 1, total)} of ${total}`;
-});
-
-const canGoToPreviousPreviewPage = computed(() => currentPreviewPage.value > 0);
-const canGoToNextPreviewPage = computed(
-  () => currentPreviewPage.value < previewPages.value.length - 1,
-);
 
 marked.use({ breaks: true });
 
 function mdToHtml(src: string): string {
-  return marked(src || "", { async: false }) as string;
+  const rawHtml = marked(src || "", { async: false }) as string;
+  return DOMPurify.sanitize(rawHtml);
+}
+
+function scrollToClause(sectionName: string) {
+  if (!sectionName) return;
+  const normalizedTarget = sectionName.replace(/\s+/g, "");
+
+  const container = document.querySelector(".document-scroll");
+  if (!container) return;
+
+  const paragraphs = document.querySelectorAll(".paper-body");
+  for (const p of paragraphs) {
+    const text = p.textContent?.replace(/\s+/g, "") || "";
+    if (text.includes(normalizedTarget)) {
+      p.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      // Highlight animation
+      p.classList.remove("highlight-pulse");
+      void (p as HTMLElement).offsetWidth; // Force reflow
+      p.classList.add("highlight-pulse");
+      return;
+    }
+  }
+  pushToast({ variant: "info", message: `未能在目前文件中定位「${sectionName}」` });
 }
 
 function extractField(block: string, label: string): string {
@@ -313,6 +311,32 @@ const overallRiskScore = computed(() => {
   return Math.round((raw / max) * 100);
 });
 
+const riskBreakdown = computed(() => {
+  let h = 0, m = 0, l = 0;
+  for (const c of riskCards.value) {
+    if (c.severity === "high") h++;
+    else if (c.severity === "medium") m++;
+    else if (c.severity === "low") l++;
+  }
+  return `高風險 ${h} 項、中風險 ${m} 項、低風險 ${l} 項`;
+});
+
+const filteredRiskCards = computed(() => {
+  let filtered = riskCards.value;
+  if (riskFilter.value === "high") {
+    filtered = filtered.filter((c) => c.severity === "high");
+  } else if (riskFilter.value === "action") {
+    filtered = filtered.filter((c) => !!c.suggestion);
+  }
+
+  const weight = { high: 3, medium: 2, low: 1 };
+  return [...filtered].sort((a, b) => {
+    const wA = weight[a.severity as keyof typeof weight] || 0;
+    const wB = weight[b.severity as keyof typeof weight] || 0;
+    return wB - wA; // desc
+  });
+});
+
 const complianceLabel = computed(() => {
   if (overallRiskScore.value >= 70) return "危險";
   if (overallRiskScore.value >= 40) return "注意";
@@ -322,7 +346,6 @@ const complianceLabel = computed(() => {
 const keyDates = computed(() => [
   { label: "檔案名稱", value: currentDocumentTitle.value },
   { label: "來源數量", value: `${sourceRows.value.length} 份` },
-  { label: "檢視頁次", value: pageLabel.value.replace("Page ", "") },
 ]);
 
 const quickActions = [
@@ -361,7 +384,6 @@ function scrollAssistantFeedToBottom() {
 async function loadPreview(chatId: string | null | undefined, specificSource?: string | null) {
   preview.value = null;
   previewLoading.value = true;
-  currentPreviewPage.value = 0;
   try {
     const entries = await getSources(chatId ?? null, { showLoading: false });
     sourceRows.value = Array.isArray(entries.entries)
@@ -424,20 +446,6 @@ watch(
   },
   { immediate: true },
 );
-
-function goToPreviousPreviewPage() {
-  if (!canGoToPreviousPreviewPage.value) {
-    return;
-  }
-  currentPreviewPage.value -= 1;
-}
-
-function goToNextPreviewPage() {
-  if (!canGoToNextPreviewPage.value) {
-    return;
-  }
-  currentPreviewPage.value += 1;
-}
 
 function setPrompt(prompt: string) {
   railTab.value = "assistant";
@@ -573,25 +581,7 @@ async function sendMessage() {
           </div>
 
           <div class="viewer-toolbar__center">
-            <button
-              type="button"
-              class="viewer-icon"
-              :disabled="!canGoToPreviousPreviewPage"
-              aria-label="上一頁"
-              @click="goToPreviousPreviewPage"
-            >
-              &lt;
-            </button>
-            <span class="viewer-page">{{ pageLabel }}</span>
-            <button
-              type="button"
-              class="viewer-icon"
-              :disabled="!canGoToNextPreviewPage"
-              aria-label="下一頁"
-              @click="goToNextPreviewPage"
-            >
-              &gt;
-            </button>
+            <!-- Pagination removed to render all articles continuously -->
           </div>
 
           <div class="viewer-toolbar__right">
@@ -625,7 +615,7 @@ async function sendMessage() {
             </header>
 
             <section
-              v-for="(paragraph, index) in activePreviewPageParagraphs"
+              v-for="(paragraph, index) in previewParagraphs"
               :key="`${index}-${paragraph.slice(0, 24)}`"
               class="paper-section"
             >
@@ -685,7 +675,7 @@ async function sendMessage() {
         </div>
 
         <div v-if="railTab === 'risk'" class="rail-panel">
-          <section class="score-card">
+          <section class="score-card" :title="riskBreakdown">
             <p class="score-card__label">風險指數</p>
             <div class="score-card__row">
               <p class="score-card__value">{{ overallRiskScore }}<span>/100</span></p>
@@ -693,14 +683,35 @@ async function sendMessage() {
                 {{ complianceLabel }}
               </span>
             </div>
+            <p class="score-card__breakdown">{{ riskBreakdown }}</p>
           </section>
 
           <section class="report-section">
-            <p class="report-section__title">KEY FINDINGS</p>
+            <div class="report-section__header">
+              <p class="report-section__title">KEY FINDINGS</p>
+              <div class="risk-filters">
+                <button
+                  class="filter-pill"
+                  :class="{ 'filter-pill--active': riskFilter === 'all' }"
+                  @click="riskFilter = 'all'"
+                >全部</button>
+                <button
+                  class="filter-pill"
+                  :class="{ 'filter-pill--active': riskFilter === 'high' }"
+                  @click="riskFilter = 'high'"
+                >僅高風險</button>
+                <button
+                  class="filter-pill"
+                  :class="{ 'filter-pill--active': riskFilter === 'action' }"
+                  @click="riskFilter = 'action'"
+                >需修改</button>
+              </div>
+            </div>
             <article
-              v-for="card in riskCards"
+              v-for="card in filteredRiskCards"
               :key="card.id"
-              class="finding-card"
+              class="finding-card finding-card--clickable"
+              @click="scrollToClause(card.section)"
             >
               <div class="finding-card__head">
                 <h3>{{ card.title }}</h3>
@@ -708,7 +719,10 @@ async function sendMessage() {
                   {{ severityLabel(card.severity) }}
                 </span>
               </div>
-              <p v-if="card.section" class="finding-card__section">{{ card.section }}</p>
+              <p v-if="card.section" class="finding-card__section">
+                {{ card.section }}
+                <span class="finding-card__jump-hint">➜ 點擊查看原文</span>
+              </p>
               <div class="finding-card__body markdown-body" v-html="mdToHtml(card.summary)" />
               <div v-if="card.suggestion" class="finding-card__suggestion">
                 <p class="finding-card__suggestion-label">AI 建議</p>
@@ -768,7 +782,7 @@ async function sendMessage() {
                   </li>
                 </ol>
               </div>
-              <div v-else-if="streamingStatus" class="streaming-indicator">
+              <div v-else-if="streamingStatus" class="streaming-indicator" role="status" aria-live="polite" :aria-label="streamingStatus">
                 <span class="streaming-dot" />
                 <span class="streaming-dot" />
                 <span class="streaming-dot" />
@@ -841,7 +855,18 @@ async function sendMessage() {
 <style scoped>
 .workspace-page {
   height: 100%;
-  min-height: 0;
+  min-height: 200px;
+}
+
+@keyframes highlightPulse {
+  0% { background-color: rgba(255, 255, 0, 0); }
+  20% { background-color: rgba(255, 235, 59, 0.4); }
+  80% { background-color: rgba(255, 235, 59, 0.4); }
+  100% { background-color: rgba(255, 255, 0, 0); }
+}
+.highlight-pulse {
+  animation: highlightPulse 2s ease-out;
+  border-radius: 4px;
 }
 
 .review-workspace {
@@ -1103,6 +1128,13 @@ async function sendMessage() {
   color: #94a3b8;
 }
 
+.score-card__breakdown {
+  font-size: 0.8rem;
+  color: #7c8da3;
+  margin-top: 8px;
+  text-align: right;
+}
+
 .score-chip,
 .finding-chip {
   border-radius: 999px;
@@ -1134,17 +1166,67 @@ async function sendMessage() {
 
 .report-section {
   margin-top: 20px;
+  padding: 16px 20px;
+}
+
+.report-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.report-section__title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #7c8da3;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.risk-filters {
+  display: flex;
+  gap: 6px;
+}
+
+.filter-pill {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  color: #7c8da3;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-pill:hover {
+  background: #f8fbff;
+}
+
+.filter-pill--active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
 }
 
 .finding-card {
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  border-radius: 8px;
   background: #ffffff;
   padding: 14px;
+  margin-bottom: 12px;
 }
 
-.finding-card + .finding-card {
-  margin-top: 12px;
+.finding-card--clickable {
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.finding-card--clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: #3b82f6;
 }
 
 .finding-card__head {
@@ -1193,12 +1275,23 @@ async function sendMessage() {
 }
 
 .finding-card__section {
-  margin: 6px 0 0;
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 600;
   color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.finding-card__jump-hint {
+  font-size: 0.7rem;
+  color: #3b82f6;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.finding-card--clickable:hover .finding-card__jump-hint {
+  opacity: 1;
 }
 
 .finding-card__suggestion {

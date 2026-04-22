@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "axios": "^1.15.0",
+    "dompurify": "^3.4.1",
     "echarts": "^6.0.0",
     "marked": "^18.0.0",
     "pinia": "^3.0.1",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
+    "@types/dompurify": "^3.0.5",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/tsconfig": "^0.7.0",
     "openapi-typescript": "^7.13.0",
