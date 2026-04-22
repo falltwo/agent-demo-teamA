@@ -238,7 +238,17 @@ def _contract_risk_with_law_search_impl(
                     for r in source_rows
                     if str(r.get("text", "")).strip()
                 ]
-                context_rag = "\n\n".join(f"[{c['tag']}]\n{c['text']}" for c in chunks_rag)
+                # 限制 context 上限避免超出模型 context window 導致 prefill 極慢
+                # 12000 字 ≈ 4000 tokens，留空間給 system prompt + law results + 回應
+                _MAX_RAG_CHARS = int(os.getenv("CONTRACT_RAG_MAX_CHARS", "12000"))
+                context_rag_full = "\n\n".join(f"[{c['tag']}]\n{c['text']}" for c in chunks_rag)
+                if len(context_rag_full) > _MAX_RAG_CHARS:
+                    context_rag = context_rag_full[:_MAX_RAG_CHARS] + "\n\n…（合約後續內容已截斷，上方為前段條款）"
+                    logger.info(
+                        "active_source context truncated: %d → %d chars", len(context_rag_full), _MAX_RAG_CHARS
+                    )
+                else:
+                    context_rag = context_rag_full
                 sources_rag: List[str] = [active_source]
                 logger.info("active_source direct load: %d chunks from %s", len(chunks_rag), active_source)
             else:
