@@ -10,7 +10,7 @@ from typing import Any
 
 from pypdf import PdfReader
 
-from rag_common import append_bm25_corpus, chunk_text, embed_texts, stable_id
+from rag_common import append_bm25_corpus, chunk_text, chunk_contract_by_article, is_contract_text, embed_texts, stable_id
 from sources_registry import update_registry_on_ingest
 
 ALLOWED_SUFFIXES = (".txt", ".md", ".pdf", ".docx")
@@ -83,7 +83,11 @@ def ingest_file_items(
         text = _extract_text_from_bytes(name, raw)
         if not text.strip():
             continue
-        parts = chunk_text(text)
+        # 合約文件（含 3 條以上條文標號）改用條文切片，保證每條完整不截斷
+        if is_contract_text(text):
+            parts = chunk_contract_by_article(text)
+        else:
+            parts = chunk_text(text)
         if chat_id:
             source = f"uploaded/{chat_id}/{name}"
         else:

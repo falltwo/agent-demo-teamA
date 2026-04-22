@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from rag_common import _bm25_tokenize, _char_tokenize, chunk_text, format_context, stable_id
+from rag_common import _bm25_tokenize, _char_tokenize, chunk_text, chunk_contract_by_article, is_contract_text, format_context, stable_id
 
 
 class TestChunkText:
@@ -111,6 +111,61 @@ class TestFormatContext:
         ctx, sources, cleaned = format_context(matches)
         assert sources == []
         assert cleaned == []
+
+
+class TestChunkContractByArticle:
+    SAMPLE_CONTRACT = (
+        "合約基本資訊\n甲方：銀峯資產股份有限公司\n乙方：恆耀科技整合有限公司\n\n"
+        "第一條 定義\n本合約所稱「系統」指依附件一所載之企業IT系統。\n\n"
+        "第二條 服務範圍\n乙方應依甲方需求提供以下服務：\n"
+        "（一）系統設計與開發\n（二）系統整合\n（三）教育訓練\n\n"
+        "第三條 服務水準（SLA）\n每月可用性不低於 99.5%。\n"
+        "例外排除：\n（一）72小時前通知的維護\n（二）不可抗力\n\n"
+        "第四條 驗收\n甲方應於交付後10個工作日內完成驗收測試。\n\n"
+        "第五條 保密\n雙方應對下列資訊保密：\n（一）技術文件\n（二）商業機密\n（三）個人資料"
+    )
+
+    def test_each_article_is_separate_chunk(self):
+        out = chunk_contract_by_article(self.SAMPLE_CONTRACT)
+        # 前言 + 5 條 = 6 chunks
+        assert len(out) == 6
+        article_chunks = [c for c in out if "第" in c and "條" in c]
+        assert len(article_chunks) == 5
+
+    def test_articles_not_mixed(self):
+        out = chunk_contract_by_article(self.SAMPLE_CONTRACT)
+        third = next(c for c in out if "第三條" in c)
+        # 第三條應包含 SLA 內容，不應包含第四條
+        assert "99.5%" in third
+        assert "第四條" not in third
+
+    def test_full_article_content_preserved(self):
+        out = chunk_contract_by_article(self.SAMPLE_CONTRACT)
+        fifth = next(c for c in out if "第五條" in c)
+        assert "技術文件" in fifth
+        assert "商業機密" in fifth
+        assert "個人資料" in fifth
+
+    def test_long_article_subchunked_with_header(self):
+        long_content = "詳細說明。" * 400  # 2000 chars
+        text = f"第一條 總則\n{long_content}\n\n第二條 結語\n合約終止。"
+        out = chunk_contract_by_article(text, max_article_chars=500)
+        sub_chunks = [c for c in out if "第一條" in c]
+        assert len(sub_chunks) >= 2
+        # 後續子 chunk 應帶「（續）」標記
+        assert any("（續）" in c for c in sub_chunks)
+
+    def test_non_contract_falls_back_to_chunk_text(self):
+        plain = "這是一份普通備忘錄，沒有任何條文結構。\n\n" * 10
+        out = chunk_contract_by_article(plain)
+        # 應退回到 chunk_text，不崩潰
+        assert isinstance(out, list)
+        assert len(out) >= 1
+
+    def test_is_contract_text_detection(self):
+        assert is_contract_text(self.SAMPLE_CONTRACT) is True
+        assert is_contract_text("普通文字沒有條文") is False
+        assert is_contract_text("第一條\n第二條\n只有兩條") is False  # < min_articles=3
 
 
 class TestBm25Tokenize:

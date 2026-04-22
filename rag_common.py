@@ -62,6 +62,87 @@ _HEADING_PATTERN = re.compile(
     r"^(?:#+\s+|[一二三四五六七八九十百]+、|第\s*[0-9一二三四五六七八九十百]+\s*條)"
 )
 
+# 合約條文條號正則：支援中文數字及阿拉伯數字
+_ARTICLE_NUM_RE = r"[一二三四五六七八九十百千萬\d]+"
+_ARTICLE_SPLIT_RE = re.compile(
+    rf"(?=第\s*{_ARTICLE_NUM_RE}\s*條[\s\u3000：:])",
+    re.UNICODE,
+)
+_ARTICLE_HEADER_RE = re.compile(
+    rf"第\s*({_ARTICLE_NUM_RE})\s*條\s*([^\n]*)",
+    re.UNICODE,
+)
+
+
+def chunk_contract_by_article(
+    text: str,
+    max_article_chars: int = 3000,
+    sub_overlap: int = 200,
+) -> list[str]:
+    """合約專用切片：每條條款為一個完整 chunk。
+
+    - 依「第X條」邊界切分，保證條文內容不被攔腰截斷
+    - 前言、附件、簽署欄等非條文部分各自成 chunk
+    - 超長條款（> max_article_chars）再做子切片，但每段保留條款首行標題
+    - 若文件不含條文結構（如純文字合約）則自動退回 chunk_text()
+
+    Args:
+        text: 合約全文
+        max_article_chars: 單一條款 chunk 字元上限（預設 3000）
+        sub_overlap: 子切片 overlap（預設 200）
+
+    Returns:
+        每個元素為一個完整條款（或條款片段）的字串列表
+    """
+    splits = list(_ARTICLE_SPLIT_RE.finditer(text))
+    if len(splits) < 2:
+        # 條文數量不足，退回通用切法（如純文字備忘錄）
+        return chunk_text(text)
+
+    result: list[str] = []
+
+    # 前言（第一條之前的文字）
+    preamble = text[: splits[0].start()].strip()
+    if preamble:
+        # 前言可能包含合約基本資訊，一律完整保留
+        result.append(preamble)
+
+    # 逐條處理
+    for i, match in enumerate(splits):
+        start = match.start()
+        end = splits[i + 1].start() if i + 1 < len(splits) else len(text)
+        article_text = text[start:end].strip()
+        if not article_text:
+            continue
+
+        if len(article_text) <= max_article_chars:
+            result.append(article_text)
+        else:
+            # 超長條款：子切片，每段都帶條款標題
+            hm = _ARTICLE_HEADER_RE.match(article_text)
+            header = hm.group(0).strip() if hm else article_text.splitlines()[0].strip()
+
+            pos = 0
+            first_piece = True
+            while pos < len(article_text):
+                end_pos = min(len(article_text), pos + max_article_chars)
+                piece = article_text[pos:end_pos].strip()
+                if piece:
+                    if not first_piece:
+                        piece = f"{header}（續）\n{piece}"
+                    result.append(piece)
+                    first_piece = False
+                if end_pos >= len(article_text):
+                    break
+                pos = max(0, end_pos - sub_overlap)
+
+    return [r for r in result if r.strip()]
+
+
+def is_contract_text(text: str, min_articles: int = 3) -> bool:
+    """判斷文字是否為合約格式（含足夠數量的條文標號）。"""
+    return len(_ARTICLE_SPLIT_RE.findall(text)) >= min_articles
+
 
 def chunk_text(text: str, *, chunk_size: int = 1500, overlap: int = 200) -> list[str]:
     """先依段落/標題/合約條款切大區塊，再在區塊內做長度切片。

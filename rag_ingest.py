@@ -8,7 +8,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from document_processing import parse_path_document
-from rag_common import chunk_text, embed_texts, get_clients_and_index, save_bm25_corpus, stable_id
+from rag_common import chunk_text, chunk_contract_by_article, is_contract_text, embed_texts, get_clients_and_index, save_bm25_corpus, stable_id
 from sources_registry import update_registry_on_ingest
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,8 @@ def build_chunks_from_records(records: list[IngestRecord]) -> list[Chunk]:
         text = (record.text or "").strip()
         if not source or not text:
             continue
-        for chunk_index, part in enumerate(chunk_text(text)):
+        parts = chunk_contract_by_article(text) if is_contract_text(text) else chunk_text(text)
+        for chunk_index, part in enumerate(parts):
             chunks.append(
                 Chunk(
                     id=stable_id(source, chunk_index, part),
