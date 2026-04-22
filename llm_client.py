@@ -74,8 +74,17 @@ def get_model_for_stage(stage: str, default_model: str | None = None) -> str:
     return base_model
 
 
+_STAGE_DEFAULT_TIMEOUT: dict[str, float] = {
+    "contract_risk_verify": 70.0,   # 驗證器獨立上限，超時 fallback 草稿，不影響整體
+    "contract_risk_generate": 90.0, # 生成器上限
+}
+
+
 def get_timeout_for_stage(stage: str, default_timeout_sec: float | None = None) -> float | None:
-    """Resolve stage-specific timeout override in seconds."""
+    """Resolve stage-specific timeout override in seconds.
+
+    Priority: env var > default_timeout_sec argument > _STAGE_DEFAULT_TIMEOUT > None.
+    """
     env_keys = _STAGE_TIMEOUT_ENV_MAP.get(stage, ())
     for key in env_keys:
         raw = (os.getenv(key, "") or "").strip()
@@ -87,7 +96,9 @@ def get_timeout_for_stage(stage: str, default_timeout_sec: float | None = None) 
             continue
         if value > 0:
             return value
-    return default_timeout_sec
+    if default_timeout_sec is not None:
+        return default_timeout_sec
+    return _STAGE_DEFAULT_TIMEOUT.get(stage)
 
 
 class _TextResponse:

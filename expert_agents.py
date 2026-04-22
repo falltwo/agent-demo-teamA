@@ -285,11 +285,20 @@ def verify_and_correct_analysis(
         llm_client = llm_client or _client
         model = model or _model
 
+    # 截斷合約文本，避免超大合約吃滿 token 導致逾時
+    # 驗證器核查事實用，20k 字已足夠覆蓋 90% 的合約
+    _MAX_CONTRACT_CHARS = 20_000
+    contract_text_for_verify = (
+        contract_full_text[:_MAX_CONTRACT_CHARS] + "\n…（以上為合約前段，後續內容省略）"
+        if len(contract_full_text) > _MAX_CONTRACT_CHARS
+        else contract_full_text
+    )
+
     verify_prompt = (
         "## 草稿分析（待核查）\n\n"
         + draft_answer
         + "\n\n## 合約原文（核查依據，以下為完整合約內容）\n\n"
-        + contract_full_text
+        + contract_text_for_verify
         + "\n\n請依上述四項規則核查草稿，輸出修正後的完整分析："
     )
 

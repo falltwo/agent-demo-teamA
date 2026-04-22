@@ -35,7 +35,7 @@ def _route_and_answer_with_timeout(
     cancel_event: threading.Event | None = None,
     **kwargs: Any,
 ) -> tuple[str, list[str], list[dict[str, Any]], str, dict[str, Any] | None]:
-    timeout_sec = float(os.getenv("CHAT_ROUTE_TIMEOUT_SEC", "120").strip() or "120")
+    timeout_sec = float(os.getenv("CHAT_ROUTE_TIMEOUT_SEC", "200").strip() or "200")
     poll_interval = 0.5  # 每 0.5s 檢查一次 cancel_event
     executor = ThreadPoolExecutor(max_workers=1)
     # 複製當前 context，讓 worker thread 可讀取 ContextVar（例如 progress emitter）
