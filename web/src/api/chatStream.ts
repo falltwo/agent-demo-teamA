@@ -95,9 +95,11 @@ export async function postChatStream(
       if (signal?.aborted) break;
 
       buffer += decoder.decode(value, { stream: true });
+      // 支援 \n\n 與 \r\n\r\n 兩種 SSE 事件分隔
+      const normalized = buffer.replace(/\r\n/g, "\n");
 
-      // 解析 SSE：每個事件以 \n\n 分隔
-      const parts = buffer.split("\n\n");
+      // 解析 SSE：每個事件以空白行分隔
+      const parts = normalized.split("\n\n");
       // 最後一部分可能不完整，保留在 buffer
       buffer = parts.pop() ?? "";
 
@@ -105,16 +107,17 @@ export async function postChatStream(
         if (!part.trim()) continue;
 
         let eventType = "";
-        let dataStr = "";
+        const dataLines: string[] = [];
 
         for (const line of part.split("\n")) {
-          if (line.startsWith("event: ")) {
-            eventType = line.slice(7).trim();
-          } else if (line.startsWith("data: ")) {
-            dataStr = line.slice(6);
+          if (line.startsWith("event:")) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).trimStart());
           }
         }
 
+        const dataStr = dataLines.join("\n");
         if (!eventType || !dataStr) continue;
 
         try {
