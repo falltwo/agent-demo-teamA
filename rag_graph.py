@@ -51,6 +51,10 @@ class RAGState(_RAGStateRequired, total=False):
     chat_id: str  # 選填：檢索僅限該對話上傳的 chunks；亦作為 thread_id
     llm_calls: int  # 呼叫次數計數，供 budget 判斷
     degraded_steps: List[str]  # 中途降級的步驟（aux_queries_failed 等），用於可觀測性
+    # Retrieval 品質指標（eval log 用）
+    top_score: float | None   # rerank 後第一筆的相似度分數
+    rerank_method: str        # 實際使用的 rerank 方式（mmr / llm / none）
+    chunks_count: int         # rerank 後實際取得的 chunks 數量
 
 
 # 生成回答時只取最近 N 輪對話，避免過長歷史吃滿 context 並維持「記得上下文」效果
@@ -619,7 +623,12 @@ def _build_graph():
             if not context:
                 context = "(無檢索內容)"
 
-            logger.info("rag_graph node=retrieve duration_sec=%.3f outcome=ok", time.perf_counter() - t0)
+            _top_score = best_matches[0].get("score") if best_matches else None
+            if _top_score is not None and not isinstance(_top_score, (int, float)):
+                _top_score = None
+
+            logger.info("rag_graph node=retrieve duration_sec=%.3f outcome=ok chunks=%d top_score=%s rerank=%s",
+                        time.perf_counter() - t0, len(best_matches), _top_score, _select_rerank_method())
             return {
                 "question": question,
                 "top_k": top_k,
@@ -630,6 +639,9 @@ def _build_graph():
                 "history": history,
                 "strict": strict,
                 "packaged_context": "",
+                "top_score": _top_score,
+                "rerank_method": _select_rerank_method(),
+                "chunks_count": len(best_matches),
             }
         except Exception as e:
             logger.exception("rag_graph node=retrieve failed")
@@ -833,6 +845,9 @@ def run_rag(
         "packaged_context": result_raw.get("packaged_context", ""),
         "llm_calls": _get_llm_calls(),
         "degraded_steps": list(result_raw.get("degraded_steps") or []),
+        "top_score": result_raw.get("top_score"),
+        "rerank_method": result_raw.get("rerank_method", _select_rerank_method()),
+        "chunks_count": result_raw.get("chunks_count", 0),
     }
     if result_raw.get("error"):
         result["error"] = result_raw["error"]

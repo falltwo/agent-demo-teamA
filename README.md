@@ -236,8 +236,16 @@ PINECONE_INDEX=weck06
 CHAT_PROVIDER=ollama
 OLLAMA_CHAT_MODEL=gemma3:27b
 EMBEDDING_PROVIDER=ollama
-OLLAMA_EMBED_MODEL=snowflake-arctic-embed2:568m
+OLLAMA_EMBED_MODEL=snowflake-arctic-embed2:568m   # 或改為 bge-m3（多語言 SOTA）
 ```
+
+**Embedding 模型選項比較：**
+
+| 模型 | 參數量 | 維度 | 語言 | VRAM | 使用情境 |
+|------|--------|------|------|------|---------|
+| `gemini-embedding-001` | 雲端 | 768/1024 | 多語言 | 無（雲端） | 標準部署（有 API key） |
+| `snowflake-arctic-embed2:568m` | 568M | 1024 | 英文為主 | ~0.5 GB | 輕量本地部署 |
+| `bge-m3` | ~570M | 1024 | **繁中/英/日 SOTA** | ~1.5 GB | 中文合約推薦（`ollama pull bge-m3`） |
 
 ### 團隊共用 `.env` 規範
 
@@ -256,9 +264,14 @@ OLLAMA_RAG_RERANK_MODEL=gemma3:4b-it-qat
 # 主回答階段
 OLLAMA_RAG_GENERATE_MODEL=gemma3:27b
 
-# 合約高品質覆核（可選）
-OLLAMA_CONTRACT_RISK_VERIFY_MODEL=gpt-oss:120b
+# 合約高品質覆核（選填）：GPT-OSS 120B 開源模型做第二輪覆核（需 70 GB+ VRAM）
+# ollama pull gpt-oss:120b
+# OLLAMA_CONTRACT_RISK_VERIFY_MODEL=gpt-oss:120b
 ```
+
+> **GPT-OSS:120b** 是 OpenAI 開源的 120B 參數模型（量化版本透過 Ollama 運行）。
+> 啟用後，合約風險路徑會以此模型做最終覆核，精度接近 GPT-4 級別，適合高精度合約審閱場景。
+> 建議硬體：DGX A100 80G × 2 或同等配置。
 
 ### 輕量化部署模式
 

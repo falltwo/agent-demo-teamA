@@ -134,6 +134,7 @@ def answer_with_rag_and_log(
     )
     latency = time.perf_counter() - t0
     if eval_log_enabled():
+        _meta = extra or {}
         eval_log_run(
             question=question,
             answer=answer or "",
@@ -142,5 +143,8 @@ def answer_with_rag_and_log(
             top_k=top_k,
             source_count=len(sources),
             chat_id=chat_id,
+            top_score=_meta.get("top_score"),
+            rerank_method=_meta.get("rerank_method"),
+            chunks_count=_meta.get("chunks_count"),
         )
     return answer, sources, chunks, tool_name, extra

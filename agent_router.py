@@ -33,8 +33,20 @@ from intent_detector import (
 )
 from llm_client import get_model_for_stage, get_timeout_for_stage
 from progress import emit_progress
-from rag_graph import retrieve_only, run_rag, search_similar, summarize_source
+from rag_graph import RAGState, retrieve_only, run_rag, search_similar, summarize_source
 from sources_registry import list_sources
+
+
+def _rag_retrieval_meta(rag_state: RAGState) -> dict[str, object]:
+    """從 RAGState 取出 retrieval 品質指標，供 extra 欄位和 eval log 使用。"""
+    meta: dict[str, object] = {}
+    if (ts := rag_state.get("top_score")) is not None:
+        meta["top_score"] = ts
+    if rm := rag_state.get("rerank_method"):
+        meta["rerank_method"] = rm
+    if (cc := rag_state.get("chunks_count")) is not None:
+        meta["chunks_count"] = cc
+    return meta
 
 # ---------- Tool 註冊：支援的 tool 名稱集中管理，_decide_tool 與執行分支皆依此為準 ----------
 SUPPORTED_TOOLS = frozenset({
@@ -683,7 +695,7 @@ def route_and_answer(
                 rag_state.get("sources", []) or [],
                 rag_state.get("chunks", []) or [],
                 "rag_search",
-                None,
+                _rag_retrieval_meta(rag_state) or None,
             )
         # 回覆不明確，用原始問題再走一次正常路由
         question = original_question
@@ -694,7 +706,7 @@ def route_and_answer(
         answer = rag_state.get("answer", "") or ""
         sources = rag_state.get("sources", []) or []
         chunks = rag_state.get("chunks", []) or []
-        return answer, sources, chunks, "rag_search", None
+        return answer, sources, chunks, "rag_search", _rag_retrieval_meta(rag_state) or None
 
     # Firecrawl 意圖層：先判斷是否要用 Firecrawl、用哪一個（scrape_url / firecrawl_search）
     tool, tool_args = None, {}
@@ -865,7 +877,7 @@ def route_and_answer(
         answer = rag_state.get("answer", "") or ""
         sources = rag_state.get("sources", []) or []
         chunks = rag_state.get("chunks", []) or []
-        return answer, sources, chunks, "rag_search", None
+        return answer, sources, chunks, "rag_search", _rag_retrieval_meta(rag_state) or None
 
     if tool == "research":
         # Research Agent：先 RAG，信心低或無結果再補網搜，最後 LLM 整合並標註來源

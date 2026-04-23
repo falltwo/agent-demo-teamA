@@ -34,6 +34,9 @@ def log_run(
     source_count: int,
     chat_id: str | None = None,
     timestamp: str | None = None,
+    top_score: float | None = None,
+    rerank_method: str | None = None,
+    chunks_count: int | None = None,
 ) -> None:
     """寫入一筆運行記錄（JSONL 一行）。"""
     if not is_enabled():
@@ -48,6 +51,9 @@ def log_run(
         "top_k": top_k,
         "source_count": source_count,
         "chat_id": chat_id,
+        "top_score": round(top_score, 4) if top_score is not None else None,
+        "rerank_method": rerank_method,
+        "chunks_count": chunks_count,
     }
     path = _path()
     path.parent.mkdir(parents=True, exist_ok=True)
