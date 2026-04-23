@@ -30,6 +30,17 @@ const props = defineProps<{
 const LAW_REF_RE =
   /[\u4e00-\u9fff]{2,12}(?:法|條例|規則|辦法|細則)第\d+條(?:之\d+)?(?:第\d+[項款])?/g;
 
+/** 法條引用前常見的動詞/介詞前綴，不屬於法律名稱本身，需從搜尋關鍵字中去除 */
+const LAW_PREFIX_STRIP_RE = /^(?:參考|依照|依據|根據|違反|另參|另見|詳見|請參|如|依|按)\s*/;
+
+/**
+ * 從 regex 匹配結果中提取真正的法條引用（去除「參考」等前置詞），用於 URL 查詢。
+ * 顯示文字保持原樣，只有送給法規資料庫的 kw 參數被清理。
+ */
+function extractLawSearchTerm(match: string): string {
+  return match.replace(LAW_PREFIX_STRIP_RE, "");
+}
+
 /**
  * 將 HTML 字串中的法條引用包成可點擊的全國法規資料庫連結。
  * 已在 <a> 標籤內的文字不會重複處理。
@@ -41,7 +52,8 @@ function linkLawRefs(html: string): string {
     .map((chunk, idx) => {
       if (idx % 2 === 1) return chunk;
       return chunk.replace(LAW_REF_RE, (match) => {
-        const url = `https://law.moj.gov.tw/LawClass/LawSearchAll.aspx?kw=${encodeURIComponent(match)}`;
+        const searchTerm = extractLawSearchTerm(match);
+        const url = `https://law.moj.gov.tw/LawClass/LawSearchAll.aspx?kw=${encodeURIComponent(searchTerm)}`;
         return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="law-ref-link">${match}</a>`;
       });
     })
