@@ -163,26 +163,53 @@ function mdToHtml(src: string): string {
   return DOMPurify.sanitize(rawHtml);
 }
 
+function stripMarkdown(s: string): string {
+  return s
+    .replace(/\*+/g, "")       // **bold** / *em*
+    .replace(/_{1,2}([^_]+)_{1,2}/g, "$1") // __bold__ / _em_
+    .replace(/`+/g, "")         // `code`
+    .replace(/[#>~]/g, "")      // headings, quotes
+    .replace(/\s+/g, "")
+    .trim();
+}
+
 function scrollToClause(sectionName: string) {
   if (!sectionName) return;
-  const normalizedTarget = sectionName.replace(/\s+/g, "");
+  const cleaned = stripMarkdown(sectionName);
+  if (!cleaned) return;
 
   const container = document.querySelector(".document-scroll");
   if (!container) return;
 
   const paragraphs = document.querySelectorAll(".paper-body");
-  for (const p of paragraphs) {
-    const text = p.textContent?.replace(/\s+/g, "") || "";
-    if (text.includes(normalizedTarget)) {
-      p.scrollIntoView({ behavior: "smooth", block: "center" });
 
-      // Highlight animation
-      p.classList.remove("highlight-pulse");
-      void (p as HTMLElement).offsetWidth; // Force reflow
-      p.classList.add("highlight-pulse");
-      return;
+  const tryScroll = (target: string): boolean => {
+    for (const p of paragraphs) {
+      const text = (p.textContent || "").replace(/\s+/g, "");
+      if (text.includes(target)) {
+        p.scrollIntoView({ behavior: "smooth", block: "center" });
+        p.classList.remove("highlight-pulse");
+        void (p as HTMLElement).offsetWidth; // Force reflow
+        p.classList.add("highlight-pulse");
+        return true;
+      }
     }
+    return false;
+  };
+
+  // 先試完整字串
+  if (tryScroll(cleaned)) return;
+
+  // Fallback 1：抓前 8 字（條款類型常短）
+  if (cleaned.length >= 4) {
+    const short = cleaned.slice(0, 8);
+    if (tryScroll(short)) return;
   }
+
+  // Fallback 2：若有「第X條」pattern 就只找條號
+  const articleMatch = cleaned.match(/第[零一二三四五六七八九十百千0-9]+條/);
+  if (articleMatch && tryScroll(articleMatch[0])) return;
+
   pushToast({ variant: "info", message: `未能在目前文件中定位「${sectionName}」` });
 }
 

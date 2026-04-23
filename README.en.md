@@ -25,10 +25,43 @@ Traditional Chinese documentation: [README.md](README.md).
 
 | Audience | Best Use Case |
 |----------|---------------|
-| Legal / compliance teams | Find high-risk clauses quickly, compare legal references, produce a first-pass review |
+| Legal / compliance teams | Find high-risk clauses, compare legal references, complete first-pass review in 5 minutes |
 | Internal AI teams | Extend an existing RAG + agent architecture for more contract types and tool chains |
 | PoC / competition teams | Demo a full upload → retrieve → review → validate workflow in a short time |
 | Platform / IT teams | Deploy internally with `FastAPI + Vue` on DGX or other Linux infrastructure |
+
+---
+
+## Example Use Cases
+
+### Case A: Procurement contract quick review
+
+> A procurement manager receives a 15-page IT services contract from a vendor.
+
+1. Upload the contract (PDF / DOCX) — the system vectorises it automatically
+2. Type "Review the high-risk clauses in this contract"
+3. The system responds in **20–40 seconds** with:
+   - Structured risk cards (indemnity, SLA, confidentiality…)
+   - Each card includes **risk level (High/Medium/Low)**, **legal basis** (linked to judicial.gov.tw), and **revision suggestion**
+4. Click a card to jump directly to the source clause in the document preview
+
+**ROI:** Manual clause-by-clause reading typically takes 60–90 minutes. AI-assisted first pass takes ~5 minutes, letting legal staff focus on deep judgment for high-risk clauses.
+
+### Case B: Legal reference cross-check
+
+> A contract clause mentions "joint guarantor liability" — is it compliant with the Civil Code?
+
+```text
+Does Article 12 of this contract on joint guarantor liability comply with Taiwan's Civil Code? Please cite the relevant provisions.
+```
+
+The system automatically: (1) queries Tavily + judicial.gov.tw (2) retrieves the Civil Code provisions (3) cross-references them against the contract text.
+
+### Case C: NDA confidentiality period risk
+
+```text
+This NDA requires 5 years of confidentiality after termination. Is this reasonable under Taiwan legal practice?
+```
 
 ---
 
@@ -222,6 +255,31 @@ OLLAMA_RAG_GENERATE_MODEL=gemma3:27b
 OLLAMA_CONTRACT_RISK_VERIFY_MODEL=gpt-oss:120b
 ```
 
+### Lightweight deployment mode
+
+Copy `.env.lightweight` as your `.env` to run entirely on-device with no cloud API dependencies:
+
+```bash
+cp .env.lightweight .env
+ollama pull gemma3:4b-it-qat          # routing / rewrite / rerank (~2.5 GB VRAM)
+ollama pull gemma3:12b                 # main generation (~7 GB VRAM)
+ollama pull snowflake-arctic-embed2:568m  # embedding (568 M params)
+```
+
+**Standard vs lightweight deployment:**
+
+| Component | Standard (Gemini / 27B) | Lightweight (4B + 12B) |
+|-----------|------------------------|------------------------|
+| Routing / rewrite / rerank | Gemini flash-lite / gemma3:27b | gemma3:4b-it-qat |
+| Main generation | gemma3:27b | gemma3:12b |
+| Embedding | gemini-embedding-001 (cloud) | snowflake-arctic-embed2:568m (local) |
+| LLM calls per query | up to 12 | up to 6 |
+| Multi-query | enabled | disabled |
+| Rerank strategy | MMR (default) / LLM rerank (opt-in) | MMR fixed |
+| Rule-based routing cost | 0 LLM calls (rules cover 80%+ intents) | 0 LLM calls (same) |
+| Cloud API dependency | Google / Gemini | **none** |
+| Recommended VRAM | 24 GB (A5000+) | **10 GB+** (consumer GPU) |
+
 ### Timeout settings
 
 ```env
@@ -342,6 +400,42 @@ Enable strict mode in the UI to restrict answers to knowledge-base content only.
 | External tools | Tavily (law / web search), Groq, Firecrawl (optional web scraping) |
 | Testing | pytest, Playwright |
 | CI/CD | GitHub Actions + Tailscale SSH |
+
+---
+
+## Technical Innovation
+
+### 1. Rule-first intent routing (zero-LLM routing cost)
+
+`intent_detector.py` uses pure regex/string matching to handle 80%+ of routing decisions (contract review, Taiwan law lookup, Firecrawl scraping) **without any LLM call**. Only ambiguous intents that don't match a rule fall through to the LLM router.
+
+| Approach | Routing method | Cost per query |
+|----------|---------------|----------------|
+| Pure LLM routing (ReAct / function-calling) | LLM every time | 1 LLM call |
+| This system | Rules first → LLM fallback | **0 LLM calls (rule match)** |
+
+### 2. Tiered model routing
+
+Different inference difficulty levels use different model sizes instead of always using the largest model:
+
+```
+Routing / rewrite / rerank:  gemma3:4b-it-qat  (quantised, <3 GB VRAM, fast)
+Main generation:              gemma3:27b (standard) / gemma3:12b (lightweight)
+Contract verification (opt):  gpt-oss:120b (open-source large model)
+Embedding:                    snowflake-arctic-embed2:568m (568 M params, local, zero API cost)
+```
+
+### 3. Hybrid retrieval with Chinese legal-term BM25
+
+Pinecone semantic vector search + BM25 keyword retrieval + RRF Fusion. jieba word-level tokenisation with ~50 built-in Taiwan contract terms (e.g., "違約金", "政府採購法", "智慧財產權") ensures precise matching of legal terminology that embedding models may miss.
+
+### 4. Investigator / Judge dual-prompt architecture
+
+Contract review runs in two stages: (1) the **Investigator** gathers and cross-references relevant clause evidence; (2) the **Judge** produces the final risk assessment and suggestions. Separating evidence collection from reasoning improves accuracy and explainability.
+
+### 5. ContextVar-based SSE progress streaming
+
+The contract + legal lookup flow (20–40 s) uses `progress.py`'s ContextVar interface to safely propagate progress events from within a `ThreadPoolExecutor` to the SSE stream. The frontend displays a real-time 3-stage stepper: "Retrieving contract → Searching law → Generating assessment."
 
 ---
 
