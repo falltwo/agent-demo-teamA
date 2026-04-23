@@ -25,10 +25,45 @@
 
 | 對象 | 適合的使用方式 |
 |------|----------------|
-| 法務 / 合規團隊 | 快速找出高風險條款、比對法條、形成第一輪審閱意見 |
+| 法務 / 合規團隊 | 快速找出高風險條款、比對法條，5 分鐘內完成合約初審 |
 | 內部 AI 團隊 | 以現成 RAG + Agent 架構為基礎，擴充更多合約類型與工具鏈 |
-| PoC / 競賽團隊 | 用最短時間展示「可上傳文件、可檢索、可審閱、可驗證」的完整作品 |
-| 平台 / IT 團隊 | 以 `FastAPI + Vue` 方式接入內網環境，部署到 DGX 或其他 Linux 主機 |
+| PoC / 競賽團隊 | 展示「可上傳文件、可檢索、可審閱、可驗證」的完整作品 |
+| 平台 / IT 團隊 | 以 `FastAPI + Vue` 接入內網，部署到 DGX 或其他 Linux 主機 |
+
+---
+
+## 典型使用情境
+
+### 情境 A：採購合約快速審閱
+
+> 採購主管收到廠商寄來的 15 頁 IT 服務採購合約。
+
+1. 上傳合約（PDF / DOCX），系統自動向量化
+2. 輸入「請審閱這份合約的高風險條款」
+3. 系統在 **20–40 秒** 內回傳：
+   - 結構化風險卡片（違約責任、服務水準、保密義務…）
+   - 每張卡附 **風險等級（高/中/低）**、**法條依據**（連結司法院）、**修改建議**
+4. 對照右側文件預覽，直接點卡片跳到原文條款
+
+**效益：** 人工逐頁閱讀通常需要 60–90 分鐘，AI 輔助初審縮短至 5 分鐘，法務人員聚焦於高風險條款深度判斷。
+
+### 情境 B：法條查詢 + 合約交叉比對
+
+> 合約中出現「連帶保證人責任」條款，想確認是否符合民法規定。
+
+```text
+這份合約第 12 條的連帶保證人條款是否符合民法規定？請引用相關法條。
+```
+
+系統自動：(1) 查詢 Tavily + 司法院 (2) 擷取民法相關條文 (3) 與合約原文交叉比對
+
+### 情境 C：NDA 保密期限風險評估
+
+> 確認保密義務條款的年限是否過長、是否逾越合理範圍。
+
+```text
+這份 NDA 的保密義務持續 5 年，在台灣法律實務上是否合理？有無判例可參考？
+```
 
 ---
 
@@ -225,6 +260,35 @@ OLLAMA_RAG_GENERATE_MODEL=gemma3:27b
 OLLAMA_CONTRACT_RISK_VERIFY_MODEL=gpt-oss:120b
 ```
 
+### 輕量化部署模式
+
+複製 `.env.lightweight` 取代預設 `.env`，可在資源受限環境（筆電、低顯存 GPU）全程本地推論，無需任何雲端 API：
+
+```bash
+cp .env.lightweight .env
+# 預拉所需模型
+ollama pull gemma3:4b-it-qat   # 路由 / rewrite / rerank（~2.5 GB VRAM）
+ollama pull gemma3:12b          # 主生成（~7 GB VRAM）
+ollama pull snowflake-arctic-embed2:568m  # Embedding（568M 參數）
+```
+
+**標準部署 vs 輕量化部署對比：**
+
+| 項目 | 標準部署（Gemini/27B） | 輕量化部署（4B + 12B） |
+|------|----------------------|----------------------|
+| 路由 / rewrite / rerank 模型 | Gemini flash-lite / gemma3:27b | gemma3:4b-it-qat |
+| 主生成模型 | gemma3:27b | gemma3:12b |
+| Embedding 模型 | gemini-embedding-001（雲端） | snowflake-arctic-embed2:568m（本地） |
+| 每次查詢 LLM 呼叫數 | 最多 12 次（預算上限） | 最多 6 次（輕量上限） |
+| Multi-query | 開啟（+3 次 LLM 呼叫） | 關閉 |
+| Rerank 策略 | MMR（預設）/ LLM rerank（選配） | MMR 固定 |
+| 路由決策 LLM 用量 | 0（規則優先，無命中才呼叫 LLM） | 0（同左，規則覆蓋 80%+ 情境） |
+| 雲端 API 依賴 | Google / Gemini | **零依賴**（全本地） |
+| 建議 VRAM | 24 GB（A5000+） | **10 GB+**（消費級 GPU 可用） |
+
+> **設計理念：** 輕量化模式的關鍵在「輕任務用 4B 量化模型（路由/改寫/重排），重任務才用 12B（生成）」，
+> 而非把所有階段都降到最小模型。路由與改寫的品質影響較小，生成品質才是使用者直接感知的。
+
 ### Timeout 設定
 
 ```env
@@ -340,6 +404,42 @@ push 到 `main` 且 CI 全部通過後，GitHub Actions 透過 Tailscale SSH 自
 | 外部工具 | Tavily（法條 / 網路搜尋）、Groq、Firecrawl（選配，網頁擷取） |
 | 測試 | pytest、Playwright |
 | CI/CD | GitHub Actions + Tailscale SSH |
+
+---
+
+## 技術架構創新點
+
+### 1. 規則優先意圖路由（零 LLM 路由成本）
+
+`intent_detector.py` 以純 regex/字串比對處理 80%+ 的路由決策（合約審閱、台灣法條查詢、Firecrawl 爬取），**不消耗任何 LLM 呼叫**。只有無法被規則覆蓋的模糊意圖才走 LLM router，最大化整體效率。
+
+| 方案 | 路由方式 | 路由成本 |
+|------|---------|---------|
+| 純 LLM 路由（如 ReAct / function-calling） | 每次都調 LLM | 1 次 LLM / query |
+| 本系統 | 規則優先 → LLM 後備 | **0 次 LLM（規則命中）** |
+
+### 2. 階段化模型分配（Tiered Model Routing）
+
+不同推論難度使用不同大小的模型，而非一律套用最大模型：
+
+```
+路由 / 改寫 / rerank：gemma3:4b-it-qat（量化，<3 GB VRAM，快）
+主生成 / 合約審閱：gemma3:27b（標準）/ gemma3:12b（輕量）
+合約覆核（選配）：gpt-oss:120b（開源大模型）
+Embedding：snowflake-arctic-embed2:568m（568M，本地，零 API 費用）
+```
+
+### 3. 混合檢索 + 中文法律術語 BM25（Hybrid RAG）
+
+Pinecone 語意向量 + BM25 關鍵字檢索 + RRF Fusion，jieba 詞級分詞並內建約 50 個台灣合約術語辭典（「違約金」「政府採購法」「智慧財產權」等），確保法律術語精準命中。
+
+### 4. Investigator / Judge 雙 Prompt 架構
+
+合約審閱分兩階段：(1) **Investigator** 負責蒐集相關條款證據並交叉比對，(2) **Judge** 根據證據給出最終風險評估與建議。分離「資訊蒐集」與「判斷推理」提升準確率與可解釋性。
+
+### 5. ContextVar-based SSE 進度串流
+
+合約＋法條查詢流程（20–40s）透過 `progress.py` 的 ContextVar 介面，把進度事件從 `ThreadPoolExecutor` 內部安全傳遞到 SSE 串流端，前端即時顯示「檢索合約 → 搜尋法條 → 產出評估」三階段 stepper。
 
 ---
 
