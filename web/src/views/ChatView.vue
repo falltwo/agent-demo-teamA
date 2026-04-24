@@ -160,8 +160,11 @@ marked.use({ breaks: true });
 
 function mdToHtml(src: string): string {
   const rawHtml = marked(src || "", { async: false }) as string;
-  const plainHtml = rawHtml.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1");
-  return DOMPurify.sanitize(plainHtml);
+  const htmlWithoutLawLinks = rawHtml.replace(
+    /<a\b[^>]*href="([^"]*law\.moj\.gov\.tw[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi,
+    "$2",
+  );
+  return DOMPurify.sanitize(htmlWithoutLawLinks);
 }
 
 function stripMarkdown(s: string): string {
@@ -290,6 +293,44 @@ function riskCardsFromExtra(extra: Record<string, unknown> | null | undefined): 
   });
 }
 
+function dedupeRiskCards(cards: RiskCard[]): RiskCard[] {
+  const severityRank: Record<RiskCard["severity"], number> = {
+    high: 3,
+    medium: 2,
+    low: 1,
+  };
+  const merged = new Map<string, RiskCard>();
+  for (const card of cards) {
+    const key = `${card.title.trim()}::${card.section.trim()}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...card });
+      continue;
+    }
+    const severity =
+      severityRank[card.severity] > severityRank[existing.severity]
+        ? card.severity
+        : existing.severity;
+    const summary = [existing.summary, card.summary]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.indexOf(v) === i)
+      .join("\n");
+    const suggestion = [existing.suggestion, card.suggestion]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.indexOf(v) === i)
+      .join("\n");
+    merged.set(key, {
+      ...existing,
+      severity,
+      summary: summary || existing.summary,
+      suggestion,
+    });
+  }
+  return Array.from(merged.values());
+}
+
 const riskCards = computed<RiskCard[]>(() => {
   const msg = latestContractAssistant.value;
   if (!msg) {
@@ -307,11 +348,11 @@ const riskCards = computed<RiskCard[]>(() => {
 
   // 1. 優先使用後端結構化資料（contract_risk_parser.parse_risk_cards 的輸出）
   const fromExtra = riskCardsFromExtra(msg.extra);
-  if (fromExtra.length > 0) return fromExtra;
+  if (fromExtra.length > 0) return dedupeRiskCards(fromExtra);
 
   // 2. Fallback：LLM 格式未解析成功時，用舊版 regex parse markdown
   const parsed = parseAnswerToCards(msg.content);
-  if (parsed.length > 0) return parsed;
+  if (parsed.length > 0) return dedupeRiskCards(parsed);
 
   // Fallback: show a single guidance card (never expose raw chunk text)
   return [
